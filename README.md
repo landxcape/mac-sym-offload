@@ -49,7 +49,25 @@
 
 ## 🛠️ Installation
 
-### Build from Source (Cargo)
+Users do **NOT** need Rust installed to use `mso`. Standalone pre-compiled universal binaries are published on GitHub Releases for both Apple Silicon (arm64) and Intel (x86_64) Macs.
+
+### Option 1: Quick 1-Line Installer (Recommended)
+Run this command in Terminal to automatically download and install the latest release binary for your Mac architecture:
+```bash
+curl -fsSL https://raw.githubusercontent.com/username/mac-sym-offload/main/install.sh | bash
+```
+
+### Option 2: Download Pre-Compiled Binary from GitHub Releases
+1. Download `mso-macos-arm64.tar.gz` (Apple Silicon) or `mso-macos-x86_64.tar.gz` (Intel Mac) from [GitHub Releases](https://github.com/username/mac-sym-offload/releases).
+2. Extract and move `mso` to `/usr/local/bin/`:
+   ```bash
+   tar -xzf mso-macos-arm64.tar.gz
+   sudo mv mso /usr/local/bin/
+   chmod +x /usr/local/bin/mso
+   ```
+
+### Option 3: Build from Source (Cargo)
+For Rust developers who prefer building locally:
 ```bash
 git clone https://github.com/username/mac-sym-offload.git
 cd mac-sym-offload
