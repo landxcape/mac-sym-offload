@@ -181,7 +181,7 @@ mso config --reset
 
 While `mso` manages **global system build caches** (`.gradle`, `DerivedData`, `Archives`, `CoreSimulator`), your local workspace directory containing dozens of Flutter projects can also accumulate 30GB+ of local `build/` and `.dart_tool/` artifacts.
 
-Add this shell function to your `~/.zshrc` or `~/.bashrc` to clean **all Flutter projects in parallel** across Apple Silicon performance CPU cores:
+Save this `.sh` script function (e.g. into `~/.shell/flutter.sh` and source it in your `~/.zshrc` / `~/.bashrc`):
 
 ```bash
 # Parallel clean for all Flutter projects in workspace
@@ -192,7 +192,7 @@ fpclean_all() {
 }
 ```
 
-Run `cd ~/Developer/work && fpclean_all` to instantly clean all Flutter project build folders in parallel!
+Run `cd ~/Developer/work && fpclean_all` from any parent workspace directory to clean all nested Flutter project build folders in parallel!
 
 ---
 
