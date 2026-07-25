@@ -1,0 +1,6 @@
+/target
+.DS_Store
+.gemini/
+.vscode/
+.idea/
+*.swp

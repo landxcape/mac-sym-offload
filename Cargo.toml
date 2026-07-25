@@ -1,0 +1,21 @@
+[package]
+name = "mac-sym-offload"
+version = "0.1.0"
+edition = "2021"
+description = "Safely relocate bloated developer caches to an external APFS SSD with symbolic links on macOS"
+
+[[bin]]
+name = "mso"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+inquire = "0.7"
+indicatif = "0.17"
+comfy-table = "7.1"
+console = "0.15"
+anyhow = "1.0"
+dirs = "5.0"
+plist = "1.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
