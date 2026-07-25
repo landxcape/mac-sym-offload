@@ -177,6 +177,25 @@ mso config --reset
 
 ---
 
+## 💡 Bonus for Flutter Developers: Parallel Workspace Cleaner (`fpclean_all`)
+
+While `mso` manages **global system build caches** (`.gradle`, `DerivedData`, `Archives`, `CoreSimulator`), your local workspace directory containing dozens of Flutter projects can also accumulate 30GB+ of local `build/` and `.dart_tool/` artifacts.
+
+Add this shell function to your `~/.zshrc` or `~/.bashrc` to clean **all Flutter projects in parallel** across Apple Silicon performance CPU cores:
+
+```bash
+# Parallel clean for all Flutter projects in workspace
+fpclean_all() {
+  find . -name pubspec.yaml -exec grep -l "flutter:" {} \; |
+    xargs -I {} -P $(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo 6) \
+      sh -c 'd=${1%/*}; echo "Cleaning $d"; cd "$d" && flutter clean' _ {}
+}
+```
+
+Run `cd ~/Developer/work && fpclean_all` to instantly clean all Flutter project build folders in parallel!
+
+---
+
 ## 🛡️ Safety & Architecture Principles
 
 1. **Copy Verification before Local Delete**: `mso` executes `rsync -aP` and verifies exit status before removing local directories.
