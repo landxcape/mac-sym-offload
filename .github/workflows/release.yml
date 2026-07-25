@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target.arch }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - arch: arm64
+            rust_target: aarch64-apple-darwin
+            asset_name: mso-macos-arm64.tar.gz
+          - arch: x86_64
+            rust_target: x86_64-apple-darwin
+            asset_name: mso-macos-x86_64.tar.gz
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target.rust_target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target.rust_target }}
+
+      - name: Package release asset
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target.rust_target }}/release/mso staging/
+          tar -czvf ${{ matrix.target.asset_name }} -C staging mso
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target.asset_name }}
+          path: ${{ matrix.target.asset_name }}
+
+  publish:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/mso-macos-arm64.tar.gz/mso-macos-arm64.tar.gz
+            release-assets/mso-macos-x86_64.tar.gz/mso-macos-x86_64.tar.gz
+          generate_release_notes: true
