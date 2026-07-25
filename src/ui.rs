@@ -23,7 +23,7 @@ pub fn print_banner() {
     println!(
         "{} {}",
         style("  mso").bold().cyan(),
-        style("— macOS Developer Storage Migrator (v0.1.0)").bold()
+        style("- macOS Developer Storage Migrator (v0.1.0)").bold()
     );
     println!("{}", style("==================================================").cyan());
     println!();
@@ -82,7 +82,7 @@ pub fn select_external_drive(drives: &[ExternalDrive], config: &AppConfig) -> Re
             if d.is_apfs {
                 format!("{} [APFS] ({})", d.name, d.volume_path.display())
             } else {
-                format!("{} [UNSUPPORTED: {}] ({}) — Require APFS format", d.name, d.file_system, d.volume_path.display())
+                format!("{} [UNSUPPORTED: {}] ({}) - Require APFS format", d.name, d.file_system, d.volume_path.display())
             }
         })
         .collect();
@@ -106,7 +106,7 @@ pub fn select_external_drive(drives: &[ExternalDrive], config: &AppConfig) -> Re
         .iter()
         .find(|d| {
             format!("{} [APFS] ({})", d.name, d.volume_path.display()) == ans
-                || format!("{} [UNSUPPORTED: {}] ({}) — Require APFS format", d.name, d.file_system, d.volume_path.display()) == ans
+                || format!("{} [UNSUPPORTED: {}] ({}) - Require APFS format", d.name, d.file_system, d.volume_path.display()) == ans
         })
         .ok_or_else(|| anyhow::anyhow!("Selected drive not found"))?;
 
@@ -334,23 +334,23 @@ pub fn prompt_targets_to_migrate(
             let is_checked = checked_keys.contains(&t.target.key());
             let check_mark = if is_checked { "[x]" } else { "[ ]" };
             let cat_tag = match &t.state {
-                PathState::ExistingExternalData { .. } => " [Discovered Files on SSD — Ready to Re-link]",
+                PathState::ExistingExternalData { .. } => " [Discovered Files on SSD - Ready to Re-link]",
                 _ => {
                     match t.target.key().as_str() {
-                        "deriveddata" => " [BUILD OUTPUT — Safe to offload (Xcode automatically rebuilds caches)]",
-                        "coresimulator" => " [BUILD OUTPUT — Safe to offload (iOS Simulator data)]",
-                        "archives" => " [BUILD OUTPUT — Safe to offload (Xcode build archives)]",
-                        "gradle" => " [BUILD OUTPUT — Safe to offload (Android build output & dependencies)]",
-                        "pub-cache" => " [PACKAGE SOURCE — Keep local to preserve offline Flutter development]",
-                        "npm" => " [PACKAGE SOURCE — Keep local to preserve offline Node/Web development]",
-                        "m2" => " [PACKAGE SOURCE — Keep local for offline Java/Maven dependencies]",
-                        "cargo" => " [PACKAGE SOURCE — Keep local for offline Rust crate sources]",
-                        "cocoapods" => " [PACKAGE SOURCE — Keep local for offline CocoaPods spec repos]",
+                        "deriveddata" => " [BUILD OUTPUT - Safe to offload (Xcode automatically rebuilds caches)]",
+                        "coresimulator" => " [BUILD OUTPUT - Safe to offload (iOS Simulator data)]",
+                        "archives" => " [BUILD OUTPUT - Safe to offload (Xcode build archives)]",
+                        "gradle" => " [BUILD OUTPUT - Safe to offload (Android build output & dependencies)]",
+                        "pub-cache" => " [PACKAGE SOURCE - Keep local to preserve offline Flutter development]",
+                        "npm" => " [PACKAGE SOURCE - Keep local to preserve offline Node/Web development]",
+                        "m2" => " [PACKAGE SOURCE - Keep local for offline Java/Maven dependencies]",
+                        "cargo" => " [PACKAGE SOURCE - Keep local for offline Rust crate sources]",
+                        "cocoapods" => " [PACKAGE SOURCE - Keep local for offline CocoaPods spec repos]",
                         _ => {
                             if t.target.is_build_output() {
-                                " [BUILD OUTPUT — Safe to offload]"
+                                " [BUILD OUTPUT - Safe to offload]"
                             } else {
-                                " [PACKAGE SOURCE — Keep local for offline work]"
+                                " [PACKAGE SOURCE - Keep local for offline work]"
                             }
                         }
                     }
@@ -358,7 +358,7 @@ pub fn prompt_targets_to_migrate(
             };
 
             options.push(format!(
-                "{} {} ({}) — {}{}",
+                "{} {} ({}) - {}{}",
                 check_mark,
                 t.target.display_name(),
                 format_bytes(t.size_bytes),
@@ -378,7 +378,7 @@ pub fn prompt_targets_to_migrate(
         options.push("────────────────────────────────────────────────────────────".to_string());
         
         let start_action_label = if selected_count > 0 {
-            format!("✔ Start Migration Now ({} selected — {})", selected_count, format_bytes(selected_bytes))
+            format!("✔ Start Migration Now ({} selected - {})", selected_count, format_bytes(selected_bytes))
         } else {
             "✔ Start Migration Now (0 selected)".to_string()
         };
@@ -632,7 +632,7 @@ pub fn prompt_conflict_strategy(target: &TargetInfo) -> Result<ConflictStrategy>
 
     let diag_note = if external_bytes < local_bytes && external_bytes > 0 {
         format!(
-            "Diagnostic Note: External SSD contains a partial backup ({}) vs Local ({}) — transfer was likely interrupted mid-execution.",
+            "Diagnostic Note: External SSD contains a partial backup ({}) vs Local ({}): transfer was likely interrupted mid-execution.",
             external_size_str, local_size_str
         )
     } else if external_bytes == local_bytes && external_bytes > 0 {

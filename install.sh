@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
-# mso — macOS Developer Storage Migrator Installation Script
+# mso: macOS Developer Storage Migrator Installation Script
 
 REPO="landxcape/mac-sym-offload"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 echo "=================================================="
-echo "  mso — macOS Developer Storage Migrator Installer"
+echo "  mso: macOS Developer Storage Migrator Installer"
 echo "=================================================="
 echo ""
 

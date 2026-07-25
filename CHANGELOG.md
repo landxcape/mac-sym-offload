@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **APFS Validation Pipeline**: `diskutil info` verification to ensure external volume formatted as APFS before migration.
 - **Dual Execution Modes**: Interactive TUI wizard (`mso`) and non-interactive CLI commands (`scan`, `migrate`, `restore`, `repair`, `status`, `config`).
 - **Configuration Persistence**: Automatic JSON configuration storage in `~/.config/mso/config.json`.
-- **Config Recovery & SSD Auto-Discovery**: Automatic scanning of attached external SSDs for pre-existing offloaded directories (`[Discovered Files on SSD — Ready to Re-link]`).
+- **Config Recovery & SSD Auto-Discovery**: Automatic scanning of attached external SSDs for pre-existing offloaded directories (`[Discovered Files on SSD - Ready to Re-link]`).
 - **Role-Aware Target Recommendations**: Categorized checklist separating disposable **Build Outputs** (pre-checked by default) vs **Package Sources** (unchecked by default to preserve offline Flutter/Web development).
 - **Single-Stage In-Place Interactive TUI**: Smooth menu rendering with `clear_screen` in-place updates, cursor preservation, and instant action items (`[*] Auto-Select Recommended`, `[+] Select All`, `[-] Select None`, `+ Add Custom`, `↻ Force Rescan`, `‹ Back`).
 - **Top-of-Screen Viewport Positioning**: ANSI screen clearing (`\x1B[2J\x1B[1;1H`) for full-screen CLI rendering at row 1, column 1.

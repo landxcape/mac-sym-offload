@@ -1,4 +1,4 @@
-# mso — macOS Developer Storage Migrator 🚀
+# mso: macOS Developer Storage Migrator 🚀
 
 [![Rust](https://img.shields.io/badge/rust-v1.97%2B-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://apple.com/macos)
@@ -11,16 +11,16 @@
 ## 🌟 Key Features
 
 * **11 Pre-Configured + Custom Targets**: Offload Xcode DerivedData, Android `.gradle`, Flutter `.pub-cache`, NPM `.npm`, Cargo `.cargo/registry`, Maven `.m2/repository`, iOS CoreSimulator, CocoaPods, Xcode Archives, iOS Device Support, and **arbitrary custom local folders** (`+ Add Custom Local Folder Path`).
-* **Live Dual-Line Progress Bar Engine**: Displays real-time transfer speeds (`82.3 MiB/s`), live ETAs (`9m`), byte progress counters (`1.97 GiB / 45.60 GiB`), and current relative file paths—powered by a custom byte-stream parser compatible with stock macOS `/usr/bin/rsync`.
+* **Live Dual-Line Progress Bar Engine**: Displays real-time transfer speeds (`82.3 MiB/s`), live ETAs (`9m`), byte progress counters (`1.97 GiB / 45.60 GiB`), and current relative file paths: powered by a custom byte-stream parser compatible with stock macOS `/usr/bin/rsync`.
 * **5-Option Conflict Diagnostics & Rollback Engine**: When data exists on both local Mac and external SSD, `mso` calculates live sizes, detects partial backups, and offers 5 resolution strategies including **`(Recommended: Safe Merge)`**, **`Rollback SSD Data to Local`**, and **`Keep Local & Discard SSD Backup`**.
 * **Atomic Failure Rollback**: If a fresh migration fails due to macOS permission locks (`Operation not permitted`), `mso` automatically cleans up partial SSD copies to leave your local Mac state clean as `Fresh (Local)`.
 * **Custom SSD Target Subfolders**: Choose to offload directly to the external APFS volume root, browse existing subfolders, or create custom target subfolders (`mkdir -p`).
 * **APFS Filesystem Validation**: Queries volume metadata via `diskutil info` to refuse non-APFS formatted drives (exFAT/NTFS) and preserve Unix file permissions.
 * **Role-Aware Target Recommendations**: Categorizes caches into disposable **Build Outputs** (pre-checked by default for immediate space relief) vs **Package Source Registries** (unchecked by default to preserve offline Flutter, Web, and Rust development).
-* **Config Crash Recovery & Auto-Discovery**: Automatically scans attached external SSDs for pre-existing offloaded directories and highlights them for instant re-linking (`[Discovered Files on SSD — Ready to Re-link]`), even if `config.json` is lost or deleted.
+* **Config Crash Recovery & Auto-Discovery**: Automatically scans attached external SSDs for pre-existing offloaded directories and highlights them for instant re-linking (`[Discovered Files on SSD - Ready to Re-link]`), even if `config.json` is lost or deleted.
 * **Single-Stage Interactive Menu**: Full TUI menu with in-place screen updates (`clear_screen`), cursor preservation, and instant action items (`[*] Auto-Select Recommended`, `[+] Select All`, `[-] Select None`, `+ Add Custom Path`, `↻ Force Rescan`, `‹ Back`).
 * **Top-of-Screen Viewport Positioning**: Automatically clears the terminal viewport upon launch (`\x1B[2J\x1B[1;1H`) so the CLI renders cleanly at row 1, column 1 without bottom-edge terminal cramping.
-* **Universal Step-Wise `ESC` Navigation**: Pressing `ESC` on any wizard step cleanly navigates back to the previous step (Step 3 Checklist $\rightarrow$ Step 2 Subfolder $\rightarrow$ Step 1 Drive Selection).
+* **Universal Step-Wise `ESC` Navigation**: Pressing `ESC` on any wizard step cleanly navigates back to the previous step (Step 3 Checklist -> Step 2 Subfolder -> Step 1 Drive Selection).
 * **In-Memory Session Caching**: Instant (~0ms) back-and-forth wizard navigation without redundant disk I/O thrashes.
 * **Safe Reverse Restore (`mso restore`)**: Brings caches back to local Mac storage with a **10GB internal disk safety gate** (`df -k /` check) to prevent Mac OS disk exhaustion.
 * **Disconnection & Conflict Repair (`mso repair`)**: Fixes broken symlinks, ghost local directories, or data conflicts using saved drive configuration.
@@ -98,21 +98,21 @@ mso
 
 ```text
 ==================================================
-  mso — macOS Developer Storage Migrator (v0.1.0)
+  mso - macOS Developer Storage Migrator (v0.1.0)
 ==================================================
 
 Step 3: Toggle components to offload or trigger actions:
-  [x] Android Gradle Cache (45.6 GB) — Fresh [BUILD OUTPUT — Safe to offload (Android build output & dependencies)]
-  [x] Xcode DerivedData (5.7 GB) — Fresh [BUILD OUTPUT — Safe to offload (Xcode automatically rebuilds caches)]
-  [ ] Xcode Archives (.xcarchive) (990.5 MB) — Fresh [BUILD OUTPUT — Safe to offload (Xcode build archives)]
-  [ ] iOS CoreSimulator (577.3 MB) — Fresh [BUILD OUTPUT — Safe to offload (iOS Simulator data)]
-  [ ] Flutter Pub Cache (.pub-cache) (4.6 GB) — Fresh [PACKAGE SOURCE — Keep local to preserve offline Flutter development]
-  [ ] NPM Package Cache (.npm) (3.5 GB) — Fresh [PACKAGE SOURCE — Keep local to preserve offline Node/Web development]
-  [ ] Maven Local Repository (.m2/repository) (1.1 GB) — Fresh [PACKAGE SOURCE — Keep local for offline Java/Maven dependencies]
-  [ ] Rust Cargo Registry (.cargo/registry) (201.2 MB) — Fresh [PACKAGE SOURCE — Keep local for offline Rust crate sources]
-  [ ] CocoaPods Cache (.cocoapods) (79.9 MB) — Fresh [PACKAGE SOURCE — Keep local for offline CocoaPods spec repos]
+  [x] Android Gradle Cache (45.6 GB) - Fresh [BUILD OUTPUT - Safe to offload (Android build output & dependencies)]
+  [x] Xcode DerivedData (5.7 GB) - Fresh [BUILD OUTPUT - Safe to offload (Xcode automatically rebuilds caches)]
+  [ ] Xcode Archives (.xcarchive) (990.5 MB) - Fresh [BUILD OUTPUT - Safe to offload (Xcode build archives)]
+  [ ] iOS CoreSimulator (577.3 MB) - Fresh [BUILD OUTPUT - Safe to offload (iOS Simulator data)]
+  [ ] Flutter Pub Cache (.pub-cache) (4.6 GB) - Fresh [PACKAGE SOURCE - Keep local to preserve offline Flutter development]
+  [ ] NPM Package Cache (.npm) (3.5 GB) - Fresh [PACKAGE SOURCE - Keep local to preserve offline Node/Web development]
+  [ ] Maven Local Repository (.m2/repository) (1.1 GB) - Fresh [PACKAGE SOURCE - Keep local for offline Java/Maven dependencies]
+  [ ] Rust Cargo Registry (.cargo/registry) (201.2 MB) - Fresh [PACKAGE SOURCE - Keep local for offline Rust crate sources]
+  [ ] CocoaPods Cache (.cocoapods) (79.9 MB) - Fresh [PACKAGE SOURCE - Keep local for offline CocoaPods spec repos]
   ────────────────────────────────────────────────────────────
-  ✔ Start Migration Now (2 selected — 51.3 GB)
+  ✔ Start Migration Now (2 selected - 51.3 GB)
   [*] Auto-Select Recommended (Build Outputs Only)
   [+] Select All Components
   [-] Select None (Clear All Checkboxes)
