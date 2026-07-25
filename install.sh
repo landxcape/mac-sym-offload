@@ -3,7 +3,7 @@ set -e
 
 # mso — macOS Developer Storage Migrator Installation Script
 
-REPO="username/mac-sym-offload"
+REPO="landxcape/mac-sym-offload"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 echo "=================================================="
