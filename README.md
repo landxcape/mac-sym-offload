@@ -57,6 +57,13 @@ Install directly via Homebrew from the `landxcape` tap:
 brew install landxcape/tap/mso
 ```
 
+To upgrade to a new release, always run `brew update` first to force-sync the tap before upgrading:
+```bash
+brew update && brew upgrade landxcape/tap/mso
+```
+
+> **Note**: Running `brew upgrade landxcape/tap/mso` alone may report "already installed" even when a new version exists. This is because Homebrew throttles tap auto-fetches to a 5-minute window. `brew update` bypasses this and force-pulls the latest formula.
+
 ### Option 2: Quick 1-Line Terminal Installer
 Run this command in Terminal to automatically download and install the latest release binary for your Mac architecture:
 ```bash
