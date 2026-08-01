@@ -1,13 +1,23 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
+use std::sync::{Mutex, OnceLock};
 
 use crate::assessment;
 use crate::config::AppConfig;
 use crate::discovery;
 use crate::migrator;
 use crate::models::{CacheTarget, ConflictStrategy, PathState};
+
+// In-process lock: tracks target keys currently being migrated.
+// Prevents concurrent MCP calls from racing on the same cache directory.
+static ACTIVE_MIGRATIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn active_migrations() -> &'static Mutex<HashSet<String>> {
+    ACTIVE_MIGRATIONS.get_or_init(|| Mutex::new(HashSet::new()))
+}
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -163,13 +173,18 @@ fn handle_mcp_request(req: &JsonRpcRequest) -> JsonRpcResponse {
                     },
                     {
                         "name": "mso_offload_target",
-                        "description": "Safely relocates a developer cache target to the connected external APFS SSD using exit-status guarded transfer and atomic failure rollback.",
+                        "description": "Previews or executes relocation of a developer cache target to the connected external APFS SSD. ALWAYS call with execute: false (default) first to preview what will happen. Only set execute: true in a follow-up call after confirming the preview with the user. Transfer duration scales with target size (e.g. ~30s for 5 GB, ~5min for 50 GB over USB-C).",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
                                 "target_key": {
                                     "type": "string",
                                     "description": "Target key to offload (e.g. 'derived-data', 'gradle', 'xcode-archives', 'coresimulator', 'ios-device-support', 'pub-cache', 'npm', 'cargo', 'cocoapods', 'maven')"
+                                },
+                                "execute": {
+                                    "type": "boolean",
+                                    "description": "Set to true to actually perform the transfer and delete the local directory. Defaults to false (dry-run preview only). Always call with false first so the user can review what will happen before committing.",
+                                    "default": false
                                 },
                                 "drive_path": {
                                     "type": "string",
@@ -481,6 +496,12 @@ fn handle_tool_offload_target(
         }
     };
 
+    // Dry-run gate: execute defaults to false.
+    // Agents MUST call with execute: false first (returns a preview),
+    // then make a second explicit call with execute: true to commit.
+    // This prevents any agent from autonomously moving/deleting data in a single call.
+    let execute = args.get("execute").and_then(|v| v.as_bool()).unwrap_or(false);
+
     // Step 2: Resolve target by key before touching the filesystem
     let target = match CacheTarget::all().into_iter().find(|t| t.key() == target_key) {
         Some(t) => t,
@@ -566,6 +587,63 @@ fn handle_tool_offload_target(
 
     let size_bytes = info.size_bytes;
 
+    // Dry-run path: return a full preview without touching disk.
+    // The calling agent must surface this to the user and then make a
+    // second explicit call with execute: true to commit.
+    if !execute {
+        let preview = json!({
+            "dry_run": true,
+            "target_key": target.key(),
+            "target_name": target.display_name(),
+            "current_state": format!("{:?}", info.state),
+            "would_move_bytes": size_bytes,
+            "would_move_human": format_bytes(size_bytes),
+            "local_path": info.local_path.to_string_lossy(),
+            "external_path": info.external_path.to_string_lossy(),
+            "conflict_strategy": strat_str,
+            "warning": format!(
+                "This will permanently remove '{}' ({}) from your local Mac disk after copying to the external SSD. Show this preview to the user and confirm before proceeding. Re-call with execute: true to commit.",
+                info.local_path.to_string_lossy(),
+                format_bytes(size_bytes)
+            )
+        });
+        return JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: req_id,
+            result: Some(json!({
+                "content": [
+                    {
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&preview).unwrap_or_default()
+                    }
+                ]
+            })),
+            error: None,
+        };
+    }
+
+    // Concurrency guard: reject if this target is already being migrated
+    // by another concurrent MCP tool call in this server process.
+    {
+        let mut active = active_migrations().lock().unwrap_or_else(|e| e.into_inner());
+        if active.contains(target_key) {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!(
+                        "Target '{}' is already being migrated. Wait for the active transfer to complete.",
+                        target_key
+                    ),
+                    data: None,
+                }),
+            };
+        }
+        active.insert(target_key.to_string());
+    }
+
     if let Some(token) = &progress_token {
         emit_mcp_progress(
             token,
@@ -576,7 +654,15 @@ fn handle_tool_offload_target(
     }
 
     // Execute non-interactive migration
-    match migrator::migrate_target(&info, Some(conflict_strat), false, false) {
+    let result = migrator::migrate_target(&info, Some(conflict_strat), false, false);
+
+    // Always release the concurrency lock, even on failure
+    {
+        let mut active = active_migrations().lock().unwrap_or_else(|e| e.into_inner());
+        active.remove(target_key);
+    }
+
+    match result {
         Ok(_) => {
             if let Some(token) = &progress_token {
                 emit_mcp_progress(
@@ -653,6 +739,35 @@ mod tests {
         let res = resp.result.unwrap();
         assert_eq!(res["protocolVersion"], "2024-11-05");
         assert_eq!(res["serverInfo"]["name"], "mso");
+    }
+
+    #[test]
+    fn test_mcp_offload_dry_run_default() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(3)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_offload_target",
+                "arguments": {
+                    "target_key": "derived-data",
+                    "drive_path": "/Volumes/MacData"
+                }
+            })),
+        };
+
+        let resp = handle_mcp_request(&req);
+        assert_eq!(resp.jsonrpc, "2.0");
+        assert_eq!(resp.id, Some(json!(3)));
+        assert!(resp.error.is_none(), "Unexpected error: {:?}", resp.error);
+
+        let res = resp.result.unwrap();
+        let text = res["content"][0]["text"].as_str().unwrap();
+        let preview: Value = serde_json::from_str(text).unwrap();
+
+        assert_eq!(preview["dry_run"], true);
+        assert_eq!(preview["target_key"], "derived-data");
+        assert!(preview["warning"].as_str().unwrap().contains("execute: true"));
     }
 
     #[test]
