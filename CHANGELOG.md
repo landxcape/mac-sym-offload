@@ -5,6 +5,35 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-01
+
+### Added
+- **Server-Enforced Dry-Run Tracking (`PREVIEWED_TARGETS`)**: The MCP server tracks previewed target keys in memory and rejects any direct `mso_offload_target(execute: true)` call with JSON-RPC error `-32002` unless a preceding `execute: false` dry-run call occurred.
+- **Implementation-Defined JSON-RPC Error Codes**: Updated error code semantics according to the JSON-RPC 2.0 specification:
+  - `-32001` (Resource Busy): Returned when `ACTIVE_MIGRATIONS` detects a target is mid-transfer.
+  - `-32002` (Dry-Run Required): Returned when `execute: true` is called without a preceding preview.
+
+### Security & Resilience
+- **Stream Cancellation Resilience**: Documented that transfers run synchronously to completion with full atomic rollback guarantees (`rsync -aP` with exit-code verification). If a host client stream cancels mid-flight, local directories are only removed if `rsync` exits cleanly with code 0.
+
+## [0.2.1] - 2026-08-01
+
+### Added
+- **Dry-Run Confirmation Gate**: `mso_offload_target` parameter `execute` defaults to `false`. Returns a safe Dry-Run Preview JSON with path warnings and size metrics.
+- **In-Process Concurrency Locking (`ACTIVE_MIGRATIONS`)**: Prevents concurrent MCP tool calls from racing on the same target directory.
+
+## [0.2.0] - 2026-08-01
+
+### Added
+- **Native Model Context Protocol (MCP) Server (`mso mcp`)**: JSON-RPC 2.0 stdio server enabling AI assistants (Claude Desktop, Antigravity, Cursor, VS Code) to inspect, diagnose, and offload Mac developer storage natively.
+- **4 Core MCP Tools**:
+  - `mso_status`: Mac disk telemetry, APFS drive health, and offloaded vs local byte summary.
+  - `mso_list_targets`: Complete target breakdown with dual byte sizing (`size_bytes` + `size_human`) and category filters (`disposable` vs `package_registry`).
+  - `mso_diagnose`: Data drift, broken symlink (`GhostLocal`), and conflict scanner with repair recommendations.
+  - `mso_offload_target`: Non-interactive relocation with atomic failure rollbacks.
+- **Zero-Token Progress Notifications (`notifications/progress`)**: Emits side-channel JSON-RPC progress events over stdio so AI client UIs render live progress bars without consuming LLM API tokens.
+- **Strict 4-Step Input Validation**: Reordered input evaluation to return JSON-RPC `-32602` (Invalid Params) for unknown keys before filesystem I/O.
+
 ## [0.1.0] - 2026-07-25
 
 ### Added

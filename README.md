@@ -206,7 +206,7 @@ Add `mso` to your AI client configuration (e.g. `claude_desktop_config.json` or 
 * `mso_status`: Returns overall Mac disk telemetry, external APFS volume status, and summary counts of offloaded vs local cache targets.
 * `mso_list_targets`: Lists all supported developer cache targets with byte sizes, human-readable sizes, state (`Fresh`, `AlreadyLinked`, `GhostLocal`, `Conflict`), and safety recommendations (`disposable` vs `package_registry`).
 * `mso_diagnose`: Scans for data drift, unmounted external SSD symlinks (`GhostLocal`), or path conflicts.
-* `mso_offload_target`: Safely relocates a target key to the external APFS SSD using exit-status guarded transfer and atomic failure rollback.
+* `mso_offload_target`: Previews or executes relocation of a cache target to the external APFS SSD. Defaults to `execute: false` (returns a safe Dry-Run Preview). Server enforces a preview call before `execute: true` is permitted.
 
 ---
 
