@@ -88,6 +88,8 @@ pub enum Commands {
         #[arg(long)]
         reset: bool,
     },
+    /// Start Model Context Protocol (MCP) server over stdio for AI integration
+    Mcp,
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]

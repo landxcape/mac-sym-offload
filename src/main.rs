@@ -2,6 +2,7 @@ mod assessment;
 mod cli;
 mod config;
 mod discovery;
+mod mcp;
 mod migrator;
 mod models;
 mod ui;
@@ -23,6 +24,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         None => run_interactive_tui(cli.verbose),
+        Some(Commands::Mcp) => mcp::run_mcp_server(),
         Some(Commands::Scan { json }) => run_scan_command(json),
         Some(Commands::Migrate {
             targets,

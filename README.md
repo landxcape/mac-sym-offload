@@ -175,6 +175,32 @@ mso config
 mso config --reset
 ```
 
+### 8. Model Context Protocol (MCP) Server for AI Assistants
+`mso` includes a native Model Context Protocol (MCP) server that communicates over `stdio` using JSON-RPC 2.0. This allows AI assistants (Claude Desktop, Antigravity, Cursor, VS Code) to inspect developer storage, scan targets, diagnose broken links, and offload build caches natively.
+
+Run the server over stdio:
+```bash
+mso mcp
+```
+
+Add `mso` to your AI client configuration (e.g. `claude_desktop_config.json` or Antigravity MCP settings):
+```json
+{
+  "mcpServers": {
+    "mso": {
+      "command": "mso",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**Advertised MCP Tools**:
+* `mso_status`: Returns overall Mac disk telemetry, external APFS volume status, and summary counts of offloaded vs local cache targets.
+* `mso_list_targets`: Lists all supported developer cache targets with byte sizes, human-readable sizes, state (`Fresh`, `AlreadyLinked`, `GhostLocal`, `Conflict`), and safety recommendations (`disposable` vs `package_registry`).
+* `mso_diagnose`: Scans for data drift, unmounted external SSD symlinks (`GhostLocal`), or path conflicts.
+* `mso_offload_target`: Safely relocates a target key to the external APFS SSD using exit-status guarded transfer and atomic failure rollback.
+
 ---
 
 ## 💡 Bonus for Flutter Developers: Parallel Workspace Cleaner (`fpclean_all`)
