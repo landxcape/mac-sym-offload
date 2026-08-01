@@ -19,6 +19,14 @@ fn active_migrations() -> &'static Mutex<HashSet<String>> {
     ACTIVE_MIGRATIONS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+// Server-enforced dry-run tracking: stores target keys that have received a dry-run preview.
+// Rejects execute: true calls unless a dry-run preview was generated first.
+static PREVIEWED_TARGETS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn previewed_targets() -> &'static Mutex<HashSet<String>> {
+    PREVIEWED_TARGETS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct JsonRpcRequest {
@@ -587,10 +595,15 @@ fn handle_tool_offload_target(
 
     let size_bytes = info.size_bytes;
 
-    // Dry-run path: return a full preview without touching disk.
-    // The calling agent must surface this to the user and then make a
-    // second explicit call with execute: true to commit.
+    // Dry-run gate: execute defaults to false.
+    // Server enforces that execute: true calls MUST be preceded by a call with execute: false.
     if !execute {
+        // Record that a dry-run preview was generated for this target key
+        {
+            let mut previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
+            previewed.insert(target_key.to_string());
+        }
+
         let preview = json!({
             "dry_run": true,
             "target_key": target.key(),
@@ -622,6 +635,26 @@ fn handle_tool_offload_target(
         };
     }
 
+    // SERVER-ENFORCED GATE: Reject execute: true if no preceding dry-run preview call occurred
+    {
+        let previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
+        if !previewed.contains(target_key) {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32002, // Implementation-defined error: Dry-run required
+                    message: format!(
+                        "Dry-run preview required prior to execution. Call mso_offload_target for '{}' with execute: false first.",
+                        target_key
+                    ),
+                    data: None,
+                }),
+            };
+        }
+    }
+
     // Concurrency guard: reject if this target is already being migrated
     // by another concurrent MCP tool call in this server process.
     {
@@ -632,7 +665,7 @@ fn handle_tool_offload_target(
                 id: req_id,
                 result: None,
                 error: Some(JsonRpcError {
-                    code: -32603,
+                    code: -32001, // Implementation-defined error: Resource Busy
                     message: format!(
                         "Target '{}' is already being migrated. Wait for the active transfer to complete.",
                         target_key
@@ -660,6 +693,12 @@ fn handle_tool_offload_target(
     {
         let mut active = active_migrations().lock().unwrap_or_else(|e| e.into_inner());
         active.remove(target_key);
+    }
+
+    // On completion, clear dry-run preview state so future operations require a fresh preview
+    {
+        let mut previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
+        previewed.remove(target_key);
     }
 
     match result {
@@ -768,6 +807,30 @@ mod tests {
         assert_eq!(preview["dry_run"], true);
         assert_eq!(preview["target_key"], "derived-data");
         assert!(preview["warning"].as_str().unwrap().contains("execute: true"));
+    }
+
+    #[test]
+    fn test_mcp_execute_without_preview_fails() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(4)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_offload_target",
+                "arguments": {
+                    "target_key": "coresimulator",
+                    "execute": true,
+                    "drive_path": "/Volumes/MacData"
+                }
+            })),
+        };
+
+        let resp = handle_mcp_request(&req);
+        assert_eq!(resp.jsonrpc, "2.0");
+        assert_eq!(resp.id, Some(json!(4)));
+        let err = resp.error.expect("Direct execute: true without preview must fail");
+        assert_eq!(err.code, -32002);
+        assert!(err.message.contains("Dry-run preview required prior to execution"));
     }
 
     #[test]
