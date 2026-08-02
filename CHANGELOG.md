@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-08-02
+
+### Fixed
+- **Subfolder-Scoped Connectivity Check**: `inspect_drive_apfs` now resolves the underlying volume mount point (`/Volumes/MacData`) when checking filesystem info for subfolder-scoped `saved_drive` paths (e.g. `/Volumes/MacData/Developer`), eliminating false-negative drive disconnection errors.
+- **Xcode Target Path Deduplication**: Normalizes relative path construction when `saved_drive` includes a subfolder prefix (e.g. `/Volumes/MacData/Developer`), preventing double-nesting (`Developer/Developer`) and fixing false-positive `GhostLocal` classifications for `xcode-archives` and other Xcode targets.
+- **Valid Symlink Preservation**: Symlinks pointing to valid, existing SSD directories are correctly classified as `AlreadyLinked` instead of `GhostLocal`.
+
 ## [0.3.2] - 2026-08-02
 
 ### Fixed & Enhanced

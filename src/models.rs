@@ -133,6 +133,7 @@ pub enum PathState {
     /// Local directory is a valid symlink pointing to external SSD
     AlreadyLinked { target_path: PathBuf },
     /// Local directory is currently symlinked to a different external SSD (Drive Transfer mode)
+    #[allow(dead_code)]
     RebindDrive { old_target_path: PathBuf },
     /// Broken symlink or dummy local folder regenerated over missing SSD mount
     GhostLocal { symlink_target: PathBuf },
