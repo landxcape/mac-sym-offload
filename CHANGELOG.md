@@ -5,6 +5,12 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-08-02
+
+### Fixed & Enhanced
+- **Absolute Binary Path Resolution in `mcp_config.json`**: Fixed issue in Antigravity CLI setup where relative `"command": "mso"` caused tool discovery failure in non-interactive subshells. Now resolves full absolute path (`/opt/homebrew/bin/mso`) in `~/.gemini/antigravity-cli/mcp_config.json`.
+- **AI Agent MCP Preference Mandate**: Added explicit directive to `instructions.md` instructing AI agents (Codex, Claude, Antigravity) to use native MCP tools (`mso_get_status`, `mso_offload_target`, `mso_repair_*`, etc.) instead of falling back to terminal CLI commands.
+
 ## [0.3.8] - 2026-08-02
 
 ### Fixed

@@ -196,6 +196,9 @@ pub fn configure_client(info: &AiClientInfo, overwrite: bool) -> Result<String> 
         // Write instructions.md
         let instructions_content = r#"# mso (macOS Developer Storage Migrator) MCP Server Instructions
 
+## 🤖 AI AGENT EXECUTION MANDATE
+AI agents **MUST ALWAYS** use native MCP tools (`mso_get_status`, `mso_list_targets`, `mso_offload_target`, `mso_repair_*`, etc.) for all `mso` tasks instead of invoking shell/terminal commands (`mso ...`). Do NOT execute `mso` CLI shell commands unless native MCP tools are unreachable.
+
 ## ⚠️ EXPLICIT USER CONFIRMATION DIRECTIVE (MANDATORY FOR AI AGENTS)
 
 When executing data relocation (`mso_offload_target`, `mso_offload_custom_folder`, `mso_offload_recommended`), reverse restores (`mso_restore_target`, `mso_restore_with_backup`), or conflict repairs (`mso_repair_*`), AI agents **MUST** follow this 2-step confirmation protocol:
@@ -234,6 +237,7 @@ When executing data relocation (`mso_offload_target`, `mso_offload_custom_folder
             ("mso_repair_discard_local", "Executes Discard Local repair strategy."),
             ("mso_repair_rollback_to_local", "Executes Rollback to Local repair strategy."),
             ("mso_repair_discard_external", "Executes Discard External repair strategy."),
+            ("mso_repair_relink", "Executes Relink Stale Symlink repair strategy."),
             ("mso_get_config", "Reads saved CLI configuration."),
             ("mso_set_target_drive", "Updates default target drive and subfolder."),
             ("mso_reset_config", "Resets CLI configuration to default."),
@@ -255,8 +259,42 @@ When executing data relocation (`mso_offload_target`, `mso_offload_custom_folder
             )?;
         }
 
+        // Also update mcp_config.json for Antigravity stdio protocol
+        if let Some(home) = dirs::home_dir() {
+            let mcp_config_path = home.join(".gemini").join("antigravity-cli").join("mcp_config.json");
+            let doc: Value = if mcp_config_path.exists() {
+                let content = fs::read_to_string(&mcp_config_path).unwrap_or_default();
+                serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+            } else {
+                json!({})
+            };
+
+            let mut obj_map = match doc {
+                Value::Object(m) => m,
+                _ => serde_json::Map::new(),
+            };
+
+            let mcp_servers = obj_map
+                .entry("mcpServers".to_string())
+                .or_insert_with(|| json!({}));
+
+            if !mcp_servers.is_object() {
+                *mcp_servers = json!({});
+            }
+
+            mcp_servers.as_object_mut().unwrap().insert(
+                "mso".to_string(),
+                json!({
+                    "command": mso_exe,
+                    "args": ["mcp"]
+                }),
+            );
+
+            let _ = fs::write(mcp_config_path, serde_json::to_string_pretty(&Value::Object(obj_map))?);
+        }
+
         return Ok(format!(
-            "Successfully configured Antigravity CLI MCP schema directory at {:?}",
+            "Successfully configured Antigravity CLI MCP schema directory & stdio config for {:?}",
             dir
         ));
     }

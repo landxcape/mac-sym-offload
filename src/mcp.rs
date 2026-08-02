@@ -751,6 +751,26 @@ fn handle_tool_offload_target(
         }
     };
 
+    // SERVER-ENFORCED GATE: Reject execute: true if no preceding dry-run preview call occurred
+    if execute {
+        let previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
+        if !previewed.contains(target_key) {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32002, // Implementation-defined error: Dry-run required
+                    message: format!(
+                        "Dry-run preview required prior to execution. Call mso_offload_target for '{}' with execute: false first.",
+                        target_key
+                    ),
+                    data: None,
+                }),
+            };
+        }
+    }
+
     // Step 4: Validate APFS filesystem (-32603 for system-level failures)
     if let Err(e) = discovery::validate_apfs_drive(&drive_path) {
         return JsonRpcResponse {
@@ -868,26 +888,6 @@ fn handle_tool_offload_target(
             })),
             error: None,
         };
-    }
-
-    // SERVER-ENFORCED GATE: Reject execute: true if no preceding dry-run preview call occurred
-    {
-        let previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
-        if !previewed.contains(target_key) {
-            return JsonRpcResponse {
-                jsonrpc: "2.0",
-                id: req_id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32002, // Implementation-defined error: Dry-run required
-                    message: format!(
-                        "Dry-run preview required prior to execution. Call mso_offload_target for '{}' with execute: false first.",
-                        target_key
-                    ),
-                    data: None,
-                }),
-            };
-        }
     }
 
     // Concurrency guard: reject if this target is already being migrated
