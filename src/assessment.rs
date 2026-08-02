@@ -48,12 +48,19 @@ fn determine_path_state(local_path: &Path, external_path: &Path) -> PathState {
 
     if is_symlink(local_path) {
         if let Ok(symlink_target) = fs::read_link(local_path) {
-            if symlink_target == external_path || symlink_target.exists() {
-                return PathState::AlreadyLinked {
-                    target_path: symlink_target,
-                };
+            if symlink_target == external_path {
+                if external_path.exists() {
+                    return PathState::AlreadyLinked {
+                        target_path: external_path.to_path_buf(),
+                    };
+                } else {
+                    return PathState::GhostLocal { symlink_target };
+                }
             } else {
-                return PathState::GhostLocal { symlink_target };
+                return PathState::StaleSymlink {
+                    current_target: symlink_target,
+                    expected_target: external_path.to_path_buf(),
+                };
             }
         }
     }
@@ -86,6 +93,13 @@ fn calculate_target_size(local_path: &Path, _external_path: &Path, state: &PathS
         }
         PathState::AlreadyLinked { target_path } => {
             get_fast_dir_size_bytes(target_path).unwrap_or(0)
+        }
+        PathState::StaleSymlink { current_target, expected_target } => {
+            if expected_target.exists() {
+                get_fast_dir_size_bytes(expected_target).unwrap_or(0)
+            } else {
+                get_fast_dir_size_bytes(current_target).unwrap_or(0)
+            }
         }
         PathState::ExistingExternalData { external_path: p } => {
             get_fast_dir_size_bytes(p).unwrap_or(0)
@@ -152,5 +166,28 @@ mod tests {
         let size = calculate_target_size(Path::new("/tmp"), external_path, &state);
         // Size calculation for AlreadyLinked targets must measure target_path (which has ~4.87 GiB on disk)
         assert!(size > 0);
+    }
+
+    #[test]
+    fn test_stale_symlink_detection() {
+        let unique_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base_dir = std::env::temp_dir().join(format!("mso_test_{}", unique_id));
+        let _ = std::fs::create_dir_all(&base_dir);
+
+        let local_link = base_dir.join("local_symlink");
+        let old_target = base_dir.join("old_external_path");
+        let new_target = base_dir.join("new_external_path");
+
+        std::os::unix::fs::symlink(&old_target, &local_link).unwrap();
+
+        let state = determine_path_state(&local_link, &new_target);
+        let _ = std::fs::remove_dir_all(&base_dir);
+
+        assert!(matches!(state, PathState::StaleSymlink { .. }));
+
+        if let PathState::StaleSymlink { current_target, expected_target } = state {
+            assert_eq!(current_target, old_target);
+            assert_eq!(expected_target, new_target);
+        }
     }
 }

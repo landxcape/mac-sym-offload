@@ -330,6 +330,19 @@ fn handle_mcp_request(req: &JsonRpcRequest) -> JsonRpcResponse {
                         }
                     },
                     {
+                        "name": "mso_repair_relink",
+                        "description": "Executes Relink strategy (removes stale/broken symlink and recreates it pointing to current expected external path).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target_key": { "type": "string" },
+                                "execute": { "type": "boolean", "default": false },
+                                "drive_path": { "type": "string" }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
                         "name": "mso_get_config",
                         "description": "Reads saved configuration preferences from ~/.config/mso/config.json.",
                         "inputSchema": { "type": "object", "properties": {}, "required": [] }
@@ -398,6 +411,7 @@ fn handle_mcp_request(req: &JsonRpcRequest) -> JsonRpcResponse {
                 "mso_repair_discard_local" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::DiscardLocal, progress_token),
                 "mso_repair_rollback_to_local" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::RollbackExternalToLocal, progress_token),
                 "mso_repair_discard_external" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::KeepLocalDiscardExternal, progress_token),
+                "mso_relink" | "mso_repair_relink" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::Relink, progress_token),
                 "mso_get_config" => handle_tool_get_config(req_id),
                 "mso_set_target_drive" => handle_tool_set_target_drive(req_id, &arguments),
                 "mso_reset_config" => handle_tool_reset_config(req_id),
@@ -457,7 +471,7 @@ fn handle_tool_status(req_id: Option<Value>) -> JsonRpcResponse {
                     total_offloaded_bytes += info.size_bytes;
                 }
                 PathState::GhostLocal { .. } => ghost_count += 1,
-                PathState::Conflict { .. } | PathState::RebindDrive { .. } => {
+                PathState::StaleSymlink { .. } | PathState::Conflict { .. } | PathState::RebindDrive { .. } => {
                     conflict_count += 1;
                     total_local_bytes += info.size_bytes;
                 }
@@ -582,7 +596,23 @@ fn handle_tool_diagnose(req_id: Option<Value>) -> JsonRpcResponse {
     let mut issues = Vec::new();
     for target in CacheTarget::all() {
         if let Ok(info) = assessment::assess_target(&target, &drive_path) {
-            if matches!(info.state, PathState::GhostLocal { .. } | PathState::Conflict { .. }) {
+            if matches!(info.state, PathState::GhostLocal { .. } | PathState::StaleSymlink { .. } | PathState::Conflict { .. }) {
+                let (description, available_strats) = match &info.state {
+                    PathState::StaleSymlink { current_target, expected_target } => (
+                        format!("Stale symlink: points to '{}', but expected path template is '{}'. Recommend relinking with mso_repair_relink.", current_target.display(), expected_target.display()),
+                        vec!["relink", "discard_local", "rollback_to_local"]
+                    ),
+                    PathState::GhostLocal { .. } => (
+                        "Disconnected drive: external SSD volume is unattached or missing target directory. Reconnect drive or restore backup.".to_string(),
+                        vec!["reconnect", "rollback_to_local"]
+                    ),
+                    PathState::Conflict { .. } => (
+                        "Data conflict: local Mac directory exists AND external SSD directory exists.".to_string(),
+                        vec!["merge", "overwrite_external", "discard_local", "rollback_to_local"]
+                    ),
+                    _ => ("".to_string(), vec![])
+                };
+
                 issues.push(json!({
                     "key": target.key(),
                     "name": target.display_name(),
@@ -591,12 +621,8 @@ fn handle_tool_diagnose(req_id: Option<Value>) -> JsonRpcResponse {
                     "external_path": info.external_path.to_string_lossy(),
                     "size_bytes": info.size_bytes,
                     "size_human": format_bytes(info.size_bytes),
-                    "description": match info.state {
-                        PathState::GhostLocal { .. } => "External SSD is unattached or symlink is broken.",
-                        PathState::Conflict { .. } => "Local directory exists AND external SSD backup exists.",
-                        _ => ""
-                    },
-                    "available_strategies": ["merge", "overwrite_external", "discard_local", "rollback_to_local"]
+                    "description": description,
+                    "available_strategies": available_strats
                 }));
             }
         }
@@ -1270,6 +1296,7 @@ fn handle_tool_repair_strategy(
         ConflictStrategy::DiscardLocal => "discard_local",
         ConflictStrategy::KeepLocalDiscardExternal => "discard_external",
         ConflictStrategy::RollbackExternalToLocal => "rollback_to_local",
+        ConflictStrategy::Relink => "relink",
     };
 
     if let Some(obj) = modified_args.as_object_mut() {
@@ -1458,10 +1485,11 @@ mod tests {
 
         let res = resp.result.unwrap();
         let tools = res["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 22);
+        assert_eq!(tools.len(), 23);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"mso_get_status"));
+        assert!(names.contains(&"mso_repair_relink"));
         assert!(names.contains(&"mso_list_all_targets"));
         assert!(names.contains(&"mso_list_disposable_targets"));
         assert!(names.contains(&"mso_list_package_registries"));

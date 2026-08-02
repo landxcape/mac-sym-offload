@@ -30,6 +30,7 @@ pub fn migrate_target(
             }
             Ok(())
         }
+        PathState::StaleSymlink { .. } => execute_relink_stale_symlink(info, verbose),
         PathState::Fresh => execute_fresh_migration(info, verbose),
         PathState::RebindDrive { old_target_path } => {
             execute_ssd_to_ssd_transfer(info, old_target_path, verbose)
@@ -50,6 +51,36 @@ pub fn migrate_target(
             Ok(())
         }
     }
+}
+
+pub fn execute_relink_stale_symlink(info: &TargetInfo, verbose: bool) -> Result<()> {
+    if is_symlink(&info.local_path) || info.local_path.exists() {
+        if is_symlink(&info.local_path) {
+            fs::remove_file(&info.local_path).context("Failed to remove old local symlink")?;
+        } else {
+            remove_path_all(&info.local_path, "Cleaning up local path before relinking...")?;
+        }
+    }
+
+    if let Some(parent) = info.external_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create parent external directory")?;
+    }
+    if let Some(parent) = info.local_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create local parent directory")?;
+    }
+
+    symlink(&info.external_path, &info.local_path)
+        .context("Failed to create updated symbolic link to external SSD")?;
+
+    if verbose {
+        println!(
+            "Relinked stale symlink for {} -> {:?}",
+            info.target.display_name(),
+            info.external_path
+        );
+    }
+
+    Ok(())
 }
 
 fn execute_fresh_migration(info: &TargetInfo, verbose: bool) -> Result<()> {
@@ -140,6 +171,7 @@ fn execute_conflict_migration(
                 remove_path_all(&info.external_path, "Removing external SSD backup after rollback...")?;
             }
         }
+        ConflictStrategy::Relink => execute_relink_stale_symlink(info, verbose)?,
     }
     Ok(())
 }

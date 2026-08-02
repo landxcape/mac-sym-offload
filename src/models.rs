@@ -132,6 +132,8 @@ pub enum PathState {
     Fresh,
     /// Local directory is a valid symlink pointing to external SSD
     AlreadyLinked { target_path: PathBuf },
+    /// Symlink points to an outdated path template or previous location
+    StaleSymlink { current_target: PathBuf, expected_target: PathBuf },
     /// Local directory is currently symlinked to a different external SSD (Drive Transfer mode)
     #[allow(dead_code)]
     RebindDrive { old_target_path: PathBuf },
@@ -152,6 +154,7 @@ pub enum ConflictStrategy {
     DiscardLocal,
     KeepLocalDiscardExternal,
     RollbackExternalToLocal,
+    Relink,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

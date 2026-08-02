@@ -235,7 +235,8 @@ pub fn print_summary_table(targets: &[TargetInfo]) {
             PathState::Fresh => Cell::new("Fresh (Local)").fg(Color::Yellow),
             PathState::AlreadyLinked { .. } => Cell::new("Linked").fg(Color::Green),
             PathState::RebindDrive { .. } => Cell::new("Drive Transfer Mode").fg(Color::Blue),
-            PathState::GhostLocal { .. } => Cell::new("Ghost Local Dir").fg(Color::Red),
+            PathState::GhostLocal { .. } => Cell::new("Disconnected Drive").fg(Color::Red),
+            PathState::StaleSymlink { .. } => Cell::new("Stale Symlink (Needs Relink)").fg(Color::Yellow),
             PathState::Conflict { .. } => Cell::new("Data Conflict").fg(Color::Magenta),
             PathState::ExistingExternalData { .. } => {
                 found_existing_on_ssd.push(t);
@@ -716,7 +717,8 @@ fn state_label(state: &PathState) -> &'static str {
         PathState::Fresh => "Fresh",
         PathState::AlreadyLinked { .. } => "Linked",
         PathState::RebindDrive { .. } => "Drive Transfer Mode",
-        PathState::GhostLocal { .. } => "Ghost Local",
+        PathState::GhostLocal { .. } => "Disconnected Drive",
+        PathState::StaleSymlink { .. } => "Stale Symlink",
         PathState::Conflict { .. } => "Conflict",
         PathState::ExistingExternalData { .. } => "Discovered on SSD",
         PathState::NotFound => "Empty",

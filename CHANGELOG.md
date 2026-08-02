@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-08-02
+
+### Added & Enhanced
+- **Stale Symlink Detection**: Added `PathState::StaleSymlink` to explicitly distinguish unmounted drives (`GhostLocal` / `Disconnected Drive`) from outdated/stale symlink targets created under legacy path templates.
+- **Dedicated Relink Strategy**: Introduced `ConflictStrategy::Relink` and MCP tool `mso_repair_relink` (alias `mso_relink`), allowing users and AI agents to safely replace stale symlinks without data copy or manual shell work.
+- **Proactive Diagnostic Telemetry**: `mso_diagnose` and `mso_diagnose_conflicts` now explicitly report stale symlinks and provide actionable `relink` recommendations.
+
 ## [0.3.4] - 2026-08-02
 
 ### Fixed
