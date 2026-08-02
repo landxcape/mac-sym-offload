@@ -5,6 +5,14 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-08-02
+
+### Fixed & Refactored
+- **Operation-First Dispatch Refactor**: Replaced state-first matching with explicit `TargetOperation` handlers across all 8 strategies (`Offload`, `Restore`, `RollbackToLocal`, `Merge`, `OverwriteExternal`, `DiscardLocal`, `DiscardExternal`, `Relink`).
+- **Fixed `mso_repair_rollback_to_local`**: Rollback now executes regardless of starting state (`AlreadyLinked`, `StaleSymlink`, `Conflict`), copying external data back to local Mac storage, removing the external SSD directory, and replacing the symlink with a real local folder.
+- **Dynamic Strategy-Aware MCP Telemetry**: Updated `handle_tool_offload_target` to generate operation-specific preview warnings, dry-run messages, and verified on-disk `bytes_moved` output.
+- **Automated Rollback Integration Test**: Added `test_execute_rollback_to_local_converts_symlink_to_real_dir` verifying true filesystem transformation on disk.
+
 ## [0.3.6] - 2026-08-02
 
 ### Enhanced

@@ -789,6 +789,57 @@ fn handle_tool_offload_target(
             previewed.insert(target_key.to_string());
         }
 
+        let (warning_msg, _action_msg) = match conflict_strat {
+            ConflictStrategy::RollbackExternalToLocal => (
+                format!(
+                    "This will restore '{}' ({}) from external SSD back to local Mac storage and delete the external backup. Re-call with execute: true to commit.",
+                    info.local_path.to_string_lossy(),
+                    format_bytes(size_bytes)
+                ),
+                format!("Successfully rolled back {} from external APFS SSD to local Mac storage.", target.display_name())
+            ),
+            ConflictStrategy::Relink => (
+                format!(
+                    "This will replace local symlink '{}' with an updated symlink pointing to '{}'. Re-call with execute: true to commit.",
+                    info.local_path.to_string_lossy(),
+                    info.external_path.to_string_lossy()
+                ),
+                format!("Successfully updated symlink for {}.", target.display_name())
+            ),
+            ConflictStrategy::DiscardLocal => (
+                format!(
+                    "This will permanently delete local Mac directory '{}' ({}) and establish a symlink to existing external SSD backup. Re-call with execute: true to commit.",
+                    info.local_path.to_string_lossy(),
+                    format_bytes(size_bytes)
+                ),
+                format!("Successfully discarded local copy and established symlink for {}.", target.display_name())
+            ),
+            ConflictStrategy::KeepLocalDiscardExternal => (
+                format!(
+                    "This will permanently delete external SSD backup '{}' ({}) and leave local Mac directory untouched. Re-call with execute: true to commit.",
+                    info.external_path.to_string_lossy(),
+                    format_bytes(size_bytes)
+                ),
+                format!("Successfully discarded external SSD backup for {}.", target.display_name())
+            ),
+            ConflictStrategy::Merge => (
+                format!(
+                    "This will merge local Mac directory '{}' ({}) into external SSD backup and establish a symlink. Re-call with execute: true to commit.",
+                    info.local_path.to_string_lossy(),
+                    format_bytes(size_bytes)
+                ),
+                format!("Successfully merged {} into external APFS SSD and established symlink.", target.display_name())
+            ),
+            ConflictStrategy::OverwriteExternal => (
+                format!(
+                    "This will overwrite external SSD backup with local Mac directory '{}' ({}) and establish a symlink. Re-call with execute: true to commit.",
+                    info.local_path.to_string_lossy(),
+                    format_bytes(size_bytes)
+                ),
+                format!("Successfully overwrote external SSD backup and established symlink for {}.", target.display_name())
+            ),
+        };
+
         let preview = json!({
             "dry_run": true,
             "target_key": target.key(),
@@ -799,11 +850,7 @@ fn handle_tool_offload_target(
             "local_path": info.local_path.to_string_lossy(),
             "external_path": info.external_path.to_string_lossy(),
             "conflict_strategy": strat_str,
-            "warning": format!(
-                "This will permanently remove '{}' ({}) from your local Mac disk after copying to the external SSD. Show this preview to the user and confirm before proceeding. Re-call with execute: true to commit.",
-                info.local_path.to_string_lossy(),
-                format_bytes(size_bytes)
-            )
+            "warning": warning_msg
         });
         return JsonRpcResponse {
             jsonrpc: "2.0",
@@ -867,7 +914,7 @@ fn handle_tool_offload_target(
             token,
             0,
             size_bytes,
-            &format!("Initializing offload for {}...", target.display_name()),
+            &format!("Initializing operation for {}...", target.display_name()),
         );
     }
 
@@ -888,12 +935,31 @@ fn handle_tool_offload_target(
 
     match result {
         Ok(_) => {
+            // Re-assess target to verify actual disk result and byte sizes
+            let post_info = assessment::assess_target(&target, &drive_path).ok();
+            let actual_bytes = post_info.as_ref().map(|i| i.size_bytes).unwrap_or(size_bytes);
+
+            let (exec_warning_msg, exec_action_msg) = match conflict_strat {
+                ConflictStrategy::RollbackExternalToLocal => (
+                    format!("Restored {} back to local Mac disk.", target.display_name()),
+                    format!("Successfully rolled back {} from external APFS SSD to local Mac storage.", target.display_name())
+                ),
+                ConflictStrategy::Relink => (
+                    format!("Updated symlink for {}.", target.display_name()),
+                    format!("Successfully updated symlink for {}.", target.display_name())
+                ),
+                _ => (
+                    format!("Offloaded {} to external SSD.", target.display_name()),
+                    format!("Successfully offloaded {} to external APFS SSD and established symlink.", target.display_name())
+                ),
+            };
+
             if let Some(token) = &progress_token {
                 emit_mcp_progress(
                     token,
-                    size_bytes,
-                    size_bytes,
-                    &format!("Finished offloading {}!", target.display_name()),
+                    actual_bytes,
+                    actual_bytes,
+                    &exec_warning_msg,
                 );
             }
 
@@ -901,11 +967,11 @@ fn handle_tool_offload_target(
                 "success": true,
                 "target_key": target.key(),
                 "target_name": target.display_name(),
-                "bytes_moved": size_bytes,
-                "bytes_moved_human": format_bytes(size_bytes),
+                "bytes_moved": actual_bytes,
+                "bytes_moved_human": format_bytes(actual_bytes),
                 "local_path": info.local_path.to_string_lossy(),
                 "external_path": info.external_path.to_string_lossy(),
-                "message": format!("Successfully offloaded {} to external APFS SSD and established symlink.", target.display_name())
+                "message": exec_action_msg
             });
             JsonRpcResponse {
                 jsonrpc: "2.0",

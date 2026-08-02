@@ -157,6 +157,19 @@ pub enum ConflictStrategy {
     Relink,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetOperation {
+    Offload,
+    #[allow(dead_code)]
+    Restore { keep_external_backup: bool },
+    RollbackToLocal,
+    Merge,
+    OverwriteExternal,
+    DiscardLocal,
+    DiscardExternal,
+    Relink,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetInfo {
     pub target: CacheTarget,

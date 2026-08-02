@@ -1,4 +1,4 @@
-use crate::models::{ConflictStrategy, PathState, TargetInfo};
+use crate::models::{ConflictStrategy, PathState, TargetInfo, TargetOperation};
 use anyhow::{anyhow, Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
@@ -13,44 +13,164 @@ pub fn migrate_target(
     dry_run: bool,
     verbose: bool,
 ) -> Result<()> {
+    let op = match conflict_strategy {
+        Some(ConflictStrategy::RollbackExternalToLocal) => TargetOperation::RollbackToLocal,
+        Some(ConflictStrategy::Relink) => TargetOperation::Relink,
+        Some(ConflictStrategy::DiscardLocal) => TargetOperation::DiscardLocal,
+        Some(ConflictStrategy::OverwriteExternal) => TargetOperation::OverwriteExternal,
+        Some(ConflictStrategy::KeepLocalDiscardExternal) => TargetOperation::DiscardExternal,
+        Some(ConflictStrategy::Merge) => TargetOperation::Merge,
+        None => match &info.state {
+            PathState::AlreadyLinked { .. } => {
+                if verbose {
+                    println!("Skipping {}: Already linked.", info.target.display_name());
+                }
+                return Ok(());
+            }
+            PathState::StaleSymlink { .. } => TargetOperation::Relink,
+            PathState::Fresh => TargetOperation::Offload,
+            PathState::RebindDrive { .. } => TargetOperation::Offload,
+            PathState::GhostLocal { .. } => TargetOperation::Offload,
+            PathState::Conflict { .. } => TargetOperation::Merge,
+            PathState::ExistingExternalData { .. } => TargetOperation::Relink,
+            PathState::NotFound => {
+                if verbose {
+                    println!(
+                        "Skipping {}: Local path does not exist.",
+                        info.target.display_name()
+                    );
+                }
+                return Ok(());
+            }
+        },
+    };
+
+    execute_operation(info, op, dry_run, verbose)
+}
+
+pub fn execute_operation(
+    info: &TargetInfo,
+    operation: TargetOperation,
+    dry_run: bool,
+    verbose: bool,
+) -> Result<()> {
     if dry_run {
         println!(
-            "[DRY-RUN] Would migrate {} from {:?} to {:?}",
-            info.target.display_name(),
-            info.local_path,
-            info.external_path
+            "[DRY-RUN] Would execute {:?} on {}",
+            operation,
+            info.target.display_name()
         );
         return Ok(());
     }
 
-    match &info.state {
-        PathState::AlreadyLinked { .. } => {
-            if verbose {
-                println!("Skipping {}: Already linked.", info.target.display_name());
-            }
-            Ok(())
+    match operation {
+        TargetOperation::RollbackToLocal => execute_rollback_to_local(info, verbose),
+        TargetOperation::Restore { keep_external_backup } => {
+            execute_restore_target(info, keep_external_backup, verbose)
         }
-        PathState::StaleSymlink { .. } => execute_relink_stale_symlink(info, verbose),
-        PathState::Fresh => execute_fresh_migration(info, verbose),
-        PathState::RebindDrive { old_target_path } => {
-            execute_ssd_to_ssd_transfer(info, old_target_path, verbose)
+        TargetOperation::Offload => execute_fresh_migration(info, verbose),
+        TargetOperation::Merge => execute_conflict_migration(info, ConflictStrategy::Merge, verbose),
+        TargetOperation::OverwriteExternal => {
+            execute_conflict_migration(info, ConflictStrategy::OverwriteExternal, verbose)
         }
-        PathState::GhostLocal { .. } => execute_ghost_repair(info, verbose),
-        PathState::Conflict { .. } => {
-            let strat = conflict_strategy.unwrap_or(ConflictStrategy::Merge);
-            execute_conflict_migration(info, strat, verbose)
+        TargetOperation::DiscardLocal => {
+            execute_conflict_migration(info, ConflictStrategy::DiscardLocal, verbose)
         }
-        PathState::ExistingExternalData { .. } => execute_reconnect_symlink(info, verbose),
-        PathState::NotFound => {
-            if verbose {
-                println!(
-                    "Skipping {}: Local path does not exist.",
-                    info.target.display_name()
-                );
-            }
-            Ok(())
+        TargetOperation::DiscardExternal => {
+            execute_conflict_migration(info, ConflictStrategy::KeepLocalDiscardExternal, verbose)
         }
+        TargetOperation::Relink => execute_relink_stale_symlink(info, verbose),
     }
+}
+
+pub fn execute_rollback_to_local(info: &TargetInfo, verbose: bool) -> Result<()> {
+    let src_path = match &info.state {
+        PathState::AlreadyLinked { target_path } => target_path.clone(),
+        PathState::StaleSymlink { current_target, .. } => {
+            if current_target.exists() {
+                current_target.clone()
+            } else {
+                info.external_path.clone()
+            }
+        }
+        _ => info.external_path.clone(),
+    };
+
+    if !src_path.exists() {
+        return Err(anyhow!(
+            "Cannot rollback {}: External data path {:?} does not exist.",
+            info.target.display_name(),
+            src_path
+        ));
+    }
+
+    if is_symlink(&info.local_path) {
+        fs::remove_file(&info.local_path).context("Failed to remove local symlink")?;
+    } else if info.local_path.exists() {
+        remove_path_all(&info.local_path, "Cleaning up local path for rollback...")?;
+    }
+
+    if let Some(parent) = info.local_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create local parent directory")?;
+    }
+
+    copy_directory_rsync(&src_path, &info.local_path, info.size_bytes, verbose)?;
+
+    remove_path_all(&src_path, "Removing external SSD backup after rollback...")?;
+
+    if verbose {
+        println!(
+            "Successfully rolled back {} to local Mac storage: {:?}",
+            info.target.display_name(),
+            info.local_path
+        );
+    }
+
+    Ok(())
+}
+
+pub fn execute_restore_target(
+    info: &TargetInfo,
+    keep_external_backup: bool,
+    verbose: bool,
+) -> Result<()> {
+    let src_path = match &info.state {
+        PathState::AlreadyLinked { target_path } => target_path.clone(),
+        PathState::StaleSymlink { current_target, .. } => {
+            if current_target.exists() {
+                current_target.clone()
+            } else {
+                info.external_path.clone()
+            }
+        }
+        _ => info.external_path.clone(),
+    };
+
+    if !src_path.exists() {
+        return Err(anyhow!(
+            "Cannot restore {}: External data path {:?} does not exist.",
+            info.target.display_name(),
+            src_path
+        ));
+    }
+
+    if is_symlink(&info.local_path) {
+        fs::remove_file(&info.local_path).context("Failed to remove local symlink")?;
+    } else if info.local_path.exists() {
+        remove_path_all(&info.local_path, "Cleaning up local path before restore...")?;
+    }
+
+    if let Some(parent) = info.local_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create local parent directory")?;
+    }
+
+    copy_directory_rsync(&src_path, &info.local_path, info.size_bytes, verbose)?;
+
+    if !keep_external_backup {
+        remove_path_all(&src_path, "Removing external SSD backup after restore...")?;
+    }
+
+    Ok(())
 }
 
 pub fn execute_relink_stale_symlink(info: &TargetInfo, verbose: bool) -> Result<()> {
@@ -107,6 +227,7 @@ fn execute_fresh_migration(info: &TargetInfo, verbose: bool) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn execute_reconnect_symlink(info: &TargetInfo, verbose: bool) -> Result<()> {
     if is_symlink(&info.local_path) || info.local_path.exists() {
         remove_path_all(&info.local_path, "Cleaning up local path before linking...")?;
@@ -176,6 +297,7 @@ fn execute_conflict_migration(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn execute_ssd_to_ssd_transfer(
     info: &TargetInfo,
     old_target: &Path,
@@ -388,4 +510,43 @@ fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|m| m.file_type().is_symlink())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{CacheTarget, PathState, TargetInfo};
+
+    #[test]
+    fn test_execute_rollback_to_local_converts_symlink_to_real_dir() {
+        let unique_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base_dir = std::env::temp_dir().join(format!("mso_rollback_test_{}", unique_id));
+        let local_path = base_dir.join("local_cache");
+        let external_path = base_dir.join("external_cache");
+
+        let _ = std::fs::create_dir_all(&external_path);
+        std::fs::write(external_path.join("sample.txt"), "hello world").unwrap();
+
+        if let Some(parent) = local_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::os::unix::fs::symlink(&external_path, &local_path).unwrap();
+
+        let info = TargetInfo {
+            target: CacheTarget::XcodeArchives,
+            local_path: local_path.clone(),
+            external_path: external_path.clone(),
+            state: PathState::AlreadyLinked { target_path: external_path.clone() },
+            size_bytes: 11,
+        };
+
+        execute_rollback_to_local(&info, false).expect("Rollback must succeed");
+
+        assert!(local_path.exists());
+        assert!(!is_symlink(&local_path));
+        assert!(local_path.join("sample.txt").exists());
+        assert!(!external_path.exists());
+
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
 }
