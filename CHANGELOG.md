@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-08-02
+
+### Fixed
+- **Xcode Target Path Unification**: Unified all three Xcode-category targets (`derived-data`, `ios-device-support`, `xcode-archives`) under the exact same nested path structure (`Developer/Developer/Xcode/...`) matching physical disk layout.
+- **AlreadyLinked Size Reporting Fix**: Fixed size calculator regression where `AlreadyLinked` targets reported `0 B` due to path field disagreement; size calculation now measures the authoritative symlink target location (`target_path`) directly.
+- **Path Field Agreement**: Ensured `external_path` and `state.target_path` always agree 100% in all status/list/diagnose outputs for `AlreadyLinked` targets.
+
 ## [0.3.3] - 2026-08-02
 
 ### Fixed

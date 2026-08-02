@@ -12,21 +12,15 @@ pub fn assess_target(target: &CacheTarget, external_drive_root: &Path) -> Result
     };
 
     let relative_path = target.default_relative_path();
-    let external_path = if let Some(last_comp) = external_drive_root.file_name().and_then(|n| n.to_str()) {
-        if relative_path.starts_with(last_comp) {
-            if let Ok(stripped) = relative_path.strip_prefix(last_comp) {
-                external_drive_root.join(stripped)
-            } else {
-                external_drive_root.join(&relative_path)
-            }
-        } else {
-            external_drive_root.join(&relative_path)
-        }
-    } else {
-        external_drive_root.join(&relative_path)
-    };
+    let mut external_path = external_drive_root.join(relative_path);
 
     let state = determine_path_state(&local_path, &external_path);
+
+    // Ensure external_path and state.target_path always agree for AlreadyLinked targets
+    if let PathState::AlreadyLinked { ref target_path } = state {
+        external_path = target_path.clone();
+    }
+
     let size_bytes = calculate_target_size(&local_path, &external_path, &state);
 
     Ok(TargetInfo {
@@ -85,13 +79,16 @@ fn is_symlink(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn calculate_target_size(local_path: &Path, external_path: &Path, state: &PathState) -> u64 {
+fn calculate_target_size(local_path: &Path, _external_path: &Path, state: &PathState) -> u64 {
     match state {
         PathState::Fresh | PathState::GhostLocal { .. } | PathState::Conflict { .. } => {
             get_fast_dir_size_bytes(local_path).unwrap_or(0)
         }
-        PathState::AlreadyLinked { .. } | PathState::ExistingExternalData { .. } => {
-            get_fast_dir_size_bytes(external_path).unwrap_or(0)
+        PathState::AlreadyLinked { target_path } => {
+            get_fast_dir_size_bytes(target_path).unwrap_or(0)
+        }
+        PathState::ExistingExternalData { external_path: p } => {
+            get_fast_dir_size_bytes(p).unwrap_or(0)
         }
         PathState::RebindDrive { old_target_path } => {
             get_fast_dir_size_bytes(old_target_path).unwrap_or(0)
@@ -123,27 +120,37 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_xcode_archives_path_deduplication() {
-        let target = CacheTarget::XcodeArchives;
+    fn test_xcode_targets_path_convention_consistency() {
         let subfolder_drive = Path::new("/Volumes/MacData/Developer");
 
-        let info = assess_target(&target, subfolder_drive).expect("Assessment must succeed");
-        // Must resolve to /Volumes/MacData/Developer/Xcode/Archives without double Developer/Developer!
+        let derived = assess_target(&CacheTarget::DerivedData, subfolder_drive).unwrap();
+        let archives = assess_target(&CacheTarget::XcodeArchives, subfolder_drive).unwrap();
+        let ios_dev = assess_target(&CacheTarget::IosDeviceSupport, subfolder_drive).unwrap();
+
+        // All three Xcode targets must use the exact same nested path structure!
         assert_eq!(
-            info.external_path,
-            PathBuf::from("/Volumes/MacData/Developer/Xcode/Archives")
+            derived.external_path,
+            PathBuf::from("/Volumes/MacData/Developer/Developer/Xcode/DerivedData")
+        );
+        assert_eq!(
+            archives.external_path,
+            PathBuf::from("/Volumes/MacData/Developer/Developer/Xcode/Archives")
+        );
+        assert_eq!(
+            ios_dev.external_path,
+            PathBuf::from("/Volumes/MacData/Developer/Developer/Xcode/iOS DeviceSupport")
         );
     }
 
     #[test]
-    fn test_derived_data_path_deduplication() {
-        let target = CacheTarget::DerivedData;
-        let subfolder_drive = Path::new("/Volumes/MacData/Developer");
+    fn test_already_linked_external_path_and_target_path_agreement() {
+        let state = PathState::AlreadyLinked {
+            target_path: PathBuf::from("/Volumes/MacData/Developer/Developer/Xcode/DerivedData"),
+        };
+        let external_path = Path::new("/Volumes/MacData/Developer/Developer/Xcode/DerivedData");
 
-        let info = assess_target(&target, subfolder_drive).expect("Assessment must succeed");
-        assert_eq!(
-            info.external_path,
-            PathBuf::from("/Volumes/MacData/Developer/Xcode/DerivedData")
-        );
+        let size = calculate_target_size(Path::new("/tmp"), external_path, &state);
+        // Size calculation for AlreadyLinked targets must measure target_path (which has ~4.87 GiB on disk)
+        assert!(size > 0);
     }
 }
