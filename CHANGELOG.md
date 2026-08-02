@@ -5,7 +5,12 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-08-02
+## [0.3.2] - 2026-08-02
+
+### Fixed & Enhanced
+- **Codex TOML Config Support**: Added full support for Codex TOML configuration files (`~/.codex/config.toml`). `mso mcp status` and `mso mcp setup` now seamlessly detect and configure `[mcp_servers.mso]` in `config.toml`.
+
+## [0.3.1] - 2026-08-02
 
 ### Added
 - **Complete 19-Tool MCP Suite**: Expanded MCP server over stdio to achieve 100% feature parity with the native CLI and interactive TUI wizard.

@@ -30,11 +30,16 @@ impl AiClientKind {
         let home = dirs::home_dir()?;
         match self {
             AiClientKind::Codex => {
-                let codex_dot = home.join(".codex").join("config.json");
-                if codex_dot.exists() {
-                    Some(codex_dot)
+                let codex_toml = home.join(".codex").join("config.toml");
+                if codex_toml.exists() {
+                    Some(codex_toml)
                 } else {
-                    Some(home.join(".config").join("codex").join("mcp.json"))
+                    let codex_dot = home.join(".codex").join("config.json");
+                    if codex_dot.exists() {
+                        Some(codex_dot)
+                    } else {
+                        Some(home.join(".config").join("codex").join("mcp.json"))
+                    }
                 }
             }
             AiClientKind::ClaudeDesktop => Some(
@@ -117,7 +122,24 @@ pub fn scan_ai_clients() -> Vec<AiClientInfo> {
                 }
             } else if config_path.exists() {
                 if let Ok(content) = fs::read_to_string(&config_path) {
-                    if let Ok(val) = serde_json::from_str::<Value>(&content) {
+                    let is_toml = config_path.extension().and_then(|e| e.to_str()) == Some("toml")
+                        || config_path.ends_with("config.toml");
+
+                    if is_toml {
+                        if content.contains("[mcp_servers.mso]") || content.contains("mcp_servers.mso") {
+                            is_configured = true;
+                            for line in content.lines() {
+                                if line.trim().starts_with("command") && line.contains("mso") {
+                                    if let Some(cmd_val) = line.split('=').nth(1) {
+                                        configured_command = Some(cmd_val.trim().trim_matches('"').to_string());
+                                    }
+                                }
+                            }
+                            if configured_command.is_none() {
+                                configured_command = Some("mso".to_string());
+                            }
+                        }
+                    } else if let Ok(val) = serde_json::from_str::<Value>(&content) {
                         if let Some(mcp_servers) = val.get("mcpServers") {
                             if let Some(mso_entry) = mcp_servers.get("mso") {
                                 is_configured = true;
@@ -239,12 +261,46 @@ When executing data relocation (`mso_offload_target`, `mso_offload_custom_folder
         ));
     }
 
-    // Standard JSON config file clients (Codex, Claude, Cursor, VS Code)
     let config_path = &info.config_path;
     if let Some(parent) = config_path.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)?;
         }
+    }
+
+    let is_toml = config_path.extension().and_then(|e| e.to_str()) == Some("toml")
+        || config_path.ends_with("config.toml");
+
+    if is_toml {
+        let mut content = if config_path.exists() {
+            fs::read_to_string(config_path)?
+        } else {
+            String::new()
+        };
+
+        if content.contains("[mcp_servers.mso]") {
+            if !overwrite {
+                return Ok(format!(
+                    "Skipped {} (already configured at {:?})",
+                    info.kind.display_name(),
+                    config_path
+                ));
+            }
+        } else {
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str("\n[mcp_servers.mso]\ncommand = \"");
+            content.push_str(&mso_exe);
+            content.push_str("\"\nargs = [\"mcp\"]\n");
+            fs::write(config_path, content)?;
+        }
+
+        return Ok(format!(
+            "Successfully configured {} at {:?}",
+            info.kind.display_name(),
+            config_path
+        ));
     }
 
     let doc: Value = if config_path.exists() {
