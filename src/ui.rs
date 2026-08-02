@@ -659,24 +659,33 @@ pub fn prompt_conflict_strategy(target: &TargetInfo) -> Result<ConflictStrategy>
     println!("   {}", style(diag_note).dim());
     println!();
 
-    let options = vec![
-        format!("(Recommended: Safe Merge) Merge Local into External [Syncs missing files to SSD & frees local space]"),
-        format!("Discard Local and Restore Symlink [Frees {} local space, uses {} SSD backup]", local_size_str, external_size_str),
-        format!("Overwrite External with Local [Deletes {} SSD backup & re-copies {} from Mac]", external_size_str, local_size_str),
-        format!("Rollback SSD Data to Local [Copies {} SSD data back to Mac & deletes SSD copy]", external_size_str),
-        format!("Keep Local & Discard SSD Backup [Deletes {} SSD copy & leaves local Mac folder unchanged]", external_size_str),
-    ];
+    let mut options = Vec::new();
+    if matches!(target.state, PathState::StaleSymlink { .. }) {
+        options.push(format!("(Recommended: Relink Symlink) Update local symlink to current expected path ({})", target.external_path.display()));
+    }
+    options.push(format!("(Recommended: Safe Merge) Merge Local into External [Syncs missing files to SSD & frees local space]"));
+    options.push(format!("Discard Local and Restore Symlink [Frees {} local space, uses {} SSD backup]", local_size_str, external_size_str));
+    options.push(format!("Overwrite External with Local [Deletes {} SSD backup & re-copies {} from Mac]", external_size_str, local_size_str));
+    options.push(format!("Rollback SSD Data to Local [Copies {} SSD data back to Mac & deletes SSD copy]", external_size_str));
+    options.push(format!("Keep Local & Discard SSD Backup [Deletes {} SSD copy & leaves local Mac folder unchanged]", external_size_str));
 
     let ans = match Select::new("Choose resolution strategy with recommendations:", options)
         .with_help_message("Use [Up/Down] to navigate, [ENTER] to select strategy")
         .prompt()
     {
         Ok(a) => a,
-        Err(InquireError::OperationCanceled) => return Ok(ConflictStrategy::Merge),
+        Err(InquireError::OperationCanceled) => {
+            if matches!(target.state, PathState::StaleSymlink { .. }) {
+                return Ok(ConflictStrategy::Relink);
+            } else {
+                return Ok(ConflictStrategy::Merge);
+            }
+        }
         Err(e) => return Err(e.into()),
     };
 
     Ok(match ans {
+        s if s.contains("Relink Symlink") => ConflictStrategy::Relink,
         s if s.starts_with("Discard Local") => ConflictStrategy::DiscardLocal,
         s if s.starts_with("Overwrite External") => ConflictStrategy::OverwriteExternal,
         s if s.starts_with("Rollback SSD Data") => ConflictStrategy::RollbackExternalToLocal,

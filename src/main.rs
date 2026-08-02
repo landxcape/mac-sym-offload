@@ -488,6 +488,20 @@ fn run_repair_command(
                         repaired_count += 1;
                     }
                 }
+                models::PathState::StaleSymlink { .. } => {
+                    let choose_strat = match strat {
+                        Some(s) => s,
+                        None => ui::prompt_conflict_strategy(&info)?,
+                    };
+                    println!("Relinking stale symlink for {}...", style(target.display_name()).cyan().bold());
+                    migrator::migrate_target(&info, Some(choose_strat), false, false)?;
+                    println!(
+                        "{} Relinked stale symlink for {}",
+                        style("Done:").green().bold(),
+                        target.display_name()
+                    );
+                    repaired_count += 1;
+                }
                 models::PathState::Conflict { .. } => {
                     let choose_strat = match strat {
                         Some(s) => s,
@@ -576,5 +590,6 @@ fn convert_cli_strategy(cli_strat: CliConflictStrategy) -> ConflictStrategy {
         CliConflictStrategy::DiscardLocal => ConflictStrategy::DiscardLocal,
         CliConflictStrategy::KeepLocalDiscardExternal => ConflictStrategy::KeepLocalDiscardExternal,
         CliConflictStrategy::RollbackExternalToLocal => ConflictStrategy::RollbackExternalToLocal,
+        CliConflictStrategy::Relink => ConflictStrategy::Relink,
     }
 }

@@ -120,4 +120,5 @@ pub enum CliConflictStrategy {
     DiscardLocal,
     KeepLocalDiscardExternal,
     RollbackExternalToLocal,
+    Relink,
 }
