@@ -183,7 +183,7 @@ mso config --reset
 ```
 
 ### 8. Model Context Protocol (MCP) Server for AI Assistants
-`mso` includes a native Model Context Protocol (MCP) server that communicates over `stdio` using JSON-RPC 2.0. This allows AI assistants (Claude Desktop, Antigravity, Cursor, VS Code) to inspect developer storage, scan targets, diagnose broken links, and offload build caches natively.
+`mso` includes a native Model Context Protocol (MCP) server that communicates over `stdio` using JSON-RPC 2.0. This allows AI assistants (Claude Desktop, Antigravity, Cursor, VS Code) to inspect developer storage, scan targets, diagnose broken links, offload build caches, restore targets, and repair conflicts.
 
 Run the server over stdio:
 ```bash
@@ -202,11 +202,18 @@ Add `mso` to your AI client configuration (e.g. `claude_desktop_config.json` or 
 }
 ```
 
-**Advertised MCP Tools**:
-* `mso_status`: Returns overall Mac disk telemetry, external APFS volume status, and summary counts of offloaded vs local cache targets.
-* `mso_list_targets`: Lists all supported developer cache targets with byte sizes, human-readable sizes, state (`Fresh`, `AlreadyLinked`, `GhostLocal`, `Conflict`), and safety recommendations (`disposable` vs `package_registry`).
-* `mso_diagnose`: Scans for data drift, unmounted external SSD symlinks (`GhostLocal`), or path conflicts.
-* `mso_offload_target`: Previews or executes relocation of a cache target to the external APFS SSD. Defaults to `execute: false` (returns a safe Dry-Run Preview). Server enforces a preview call before `execute: true` is permitted.
+#### ⚠️ Explicit User Confirmation Protocol for AI Agents
+When AI assistants perform data relocation or restore operations (`mso_offload_target`, `mso_offload_custom_folder`, `mso_restore_target`), they follow a mandatory **2-Step Confirmation Protocol**:
+1. **Step 1 (Preview)**: The tool runs with `execute: false` (default) to generate a dry-run preview containing paths, target size, and warning notes.
+2. **Step 2 (Explicit User "Yes")**: The AI assistant presents the preview details to the user and explicitly asks for confirmation (*"Would you like me to proceed with offloading 12.4 GB of DerivedData to /Volumes/ExtremeSSD? Please confirm ('yes' or 'no')."*).
+3. Only after receiving the user's explicit confirmation does the AI assistant execute the operation with `execute: true`.
+
+#### 19 Granular MCP Tools Across 5 Groups
+1. **Telemetry & Discovery**: `mso_get_status` (alias: `mso_status`), `mso_list_all_targets` (alias: `mso_list_targets`), `mso_list_disposable_targets`, `mso_list_package_registries`, `mso_diagnose_conflicts` (alias: `mso_diagnose`), `mso_discover_ssd_caches`.
+2. **Offloading & Migration**: `mso_offload_target`, `mso_offload_custom_folder` (accepts user manual local folder paths), `mso_offload_recommended` (batch offloads disposable build outputs).
+3. **Reverse Restore Engine**: `mso_restore_target` (gated by 10GB local disk safety buffer), `mso_restore_with_backup` (`--keep-external`).
+4. **Conflict & Repair Strategies**: `mso_repair_merge`, `mso_repair_overwrite_external`, `mso_repair_discard_local`, `mso_repair_rollback_to_local`, `mso_repair_discard_external`.
+5. **Config & Drive Management**: `mso_get_config`, `mso_set_target_drive` (accepts user manual drive & subfolder path), `mso_reset_config`.
 
 ---
 

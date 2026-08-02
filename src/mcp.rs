@@ -27,6 +27,13 @@ fn previewed_targets() -> &'static Mutex<HashSet<String>> {
     PREVIEWED_TARGETS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+// Server-enforced dry-run tracking for restore operations
+static PREVIEWED_RESTORES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn previewed_restores() -> &'static Mutex<HashSet<String>> {
+    PREVIEWED_RESTORES.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct JsonRpcRequest {
@@ -147,65 +154,202 @@ fn handle_mcp_request(req: &JsonRpcRequest) -> JsonRpcResponse {
             let tools = json!({
                 "tools": [
                     {
+                        "name": "mso_get_status",
+                        "description": "Returns overall Mac disk telemetry, connected APFS volume status, free space metrics, and offloaded vs local cache summaries.",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
                         "name": "mso_status",
-                        "description": "Returns overall Mac disk telemetry, external APFS volume status, and summary counts of offloaded vs local developer target paths.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {},
-                            "required": []
-                        }
+                        "description": "Alias for mso_get_status. Returns overall Mac disk telemetry and cache summaries.",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
+                        "name": "mso_list_all_targets",
+                        "description": "Lists all 11 supported developer cache targets with byte sizes, human-readable sizes, state (Fresh, AlreadyLinked, GhostLocal, Conflict), and paths.",
+                        "inputSchema": { "type": "object", "properties": { "drive_path": { "type": "string" } }, "required": [] }
                     },
                     {
                         "name": "mso_list_targets",
-                        "description": "Lists all supported developer cache targets (DerivedData, .gradle, Archives, CoreSimulator, iOS DeviceSupport, .pub-cache, .npm, etc.) with byte sizes, human-readable sizes, state (Fresh, AlreadyLinked, GhostLocal, Conflict), and safety recommendations.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "category": {
-                                    "type": "string",
-                                    "description": "Filter by target category: 'disposable' (build outputs safe to offload), 'package_registry' (source dependencies), or 'all' (default)",
-                                    "enum": ["disposable", "package_registry", "all"]
-                                }
-                            },
-                            "required": []
-                        }
+                        "description": "Lists supported developer cache targets with category filtering.",
+                        "inputSchema": { "type": "object", "properties": { "category": { "type": "string", "enum": ["disposable", "package_registry", "all"] } }, "required": [] }
+                    },
+                    {
+                        "name": "mso_list_disposable_targets",
+                        "description": "Lists only build output targets safe to offload (DerivedData, .gradle, Archives, CoreSimulator, iOS DeviceSupport, Android SDK).",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
+                        "name": "mso_list_package_registries",
+                        "description": "Lists package source registries (.pub-cache, .npm, .cargo, .m2, .cocoapods) recommended to stay local for offline development.",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
+                        "name": "mso_diagnose_conflicts",
+                        "description": "Scans for data drift, unmounted external SSD symlinks (GhostLocal), or dual-location copies (Conflict).",
+                        "inputSchema": { "type": "object", "properties": { "drive_path": { "type": "string" } }, "required": [] }
                     },
                     {
                         "name": "mso_diagnose",
-                        "description": "Scans for data drift, unmounted external SSD symlinks (GhostLocal), or path conflicts where both local and external copies exist, returning repair recommendations.",
+                        "description": "Alias for mso_diagnose_conflicts. Scans for broken symlinks and data conflicts.",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
+                        "name": "mso_discover_ssd_caches",
+                        "description": "Scans an attached SSD for pre-existing offloaded directories to auto-recover symlinks.",
+                        "inputSchema": { "type": "object", "properties": { "drive_path": { "type": "string" } }, "required": [] }
+                    },
+                    {
+                        "name": "mso_offload_target",
+                        "description": "Previews or executes relocation of a built-in cache target key to external APFS SSD. Call with execute: false (default) first to preview.",
                         "inputSchema": {
                             "type": "object",
-                            "properties": {},
+                            "properties": {
+                                "target_key": { "type": "string", "description": "Target key (e.g. 'derived-data', 'gradle', 'xcode-archives', 'coresimulator', 'ios-device-support', 'pub-cache', 'npm', 'cargo', 'cocoapods', 'maven')" },
+                                "execute": { "type": "boolean", "default": false, "description": "Set to true to commit offload. Defaults to false (dry-run preview)." },
+                                "drive_path": { "type": "string", "description": "User's manual external SSD volume path" },
+                                "subfolder_path": { "type": "string", "description": "User's manual target subfolder on SSD (e.g. 'DevCaches/Offload')" },
+                                "conflict_strategy": { "type": "string", "enum": ["merge", "overwrite_external", "discard_local"] }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
+                        "name": "mso_offload_custom_folder",
+                        "description": "Offloads an arbitrary local folder path entered manually by the user (e.g. ~/Library/Caches/Docker) to external APFS SSD.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "custom_local_path": { "type": "string", "description": "Absolute or ~/ relative local directory path entered manually by user" },
+                                "custom_name": { "type": "string", "description": "Optional human-readable label for custom target" },
+                                "execute": { "type": "boolean", "default": false, "description": "Set to true to commit. Defaults to false (preview)." },
+                                "drive_path": { "type": "string", "description": "User's manual external SSD volume path" }
+                            },
+                            "required": ["custom_local_path"]
+                        }
+                    },
+                    {
+                        "name": "mso_offload_recommended",
+                        "description": "Auto-selects and offloads all disposable build outputs in a single batch operation.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "execute": { "type": "boolean", "default": false },
+                                "drive_path": { "type": "string" }
+                            },
                             "required": []
                         }
                     },
                     {
-                        "name": "mso_offload_target",
-                        "description": "Previews or executes relocation of a developer cache target to the connected external APFS SSD. ALWAYS call with execute: false (default) first to preview what will happen. Only set execute: true in a follow-up call after confirming the preview with the user. Transfer duration scales with target size (e.g. ~30s for 5 GB, ~5min for 50 GB over USB-C).",
+                        "name": "mso_restore_target",
+                        "description": "Restores an offloaded cache target from SSD back to local Mac storage and removes symlink. Gated by 10GB disk space safety check.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "target_key": {
-                                    "type": "string",
-                                    "description": "Target key to offload (e.g. 'derived-data', 'gradle', 'xcode-archives', 'coresimulator', 'ios-device-support', 'pub-cache', 'npm', 'cargo', 'cocoapods', 'maven')"
-                                },
-                                "execute": {
-                                    "type": "boolean",
-                                    "description": "Set to true to actually perform the transfer and delete the local directory. Defaults to false (dry-run preview only). Always call with false first so the user can review what will happen before committing.",
-                                    "default": false
-                                },
-                                "drive_path": {
-                                    "type": "string",
-                                    "description": "Optional path to external APFS SSD volume (e.g. '/Volumes/ExtremeSSD'). If omitted, uses saved drive from config."
-                                },
-                                "conflict_strategy": {
-                                    "type": "string",
-                                    "description": "Resolution strategy if data exists in both places: 'merge' (default), 'overwrite_external', or 'discard_local'",
-                                    "enum": ["merge", "overwrite_external", "discard_local"]
-                                }
+                                "target_key": { "type": "string", "description": "Target key to restore back to local Mac storage" },
+                                "keep_external": { "type": "boolean", "default": false, "description": "Keep copy on external SSD after restoring" },
+                                "execute": { "type": "boolean", "default": false, "description": "Set to true to commit restore. Defaults to false (preview)." }
                             },
                             "required": ["target_key"]
                         }
+                    },
+                    {
+                        "name": "mso_restore_with_backup",
+                        "description": "Restores an offloaded target back to Mac storage while retaining a backup copy on external SSD.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target_key": { "type": "string", "description": "Target key to restore" },
+                                "execute": { "type": "boolean", "default": false }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
+                        "name": "mso_repair_merge",
+                        "description": "Executes Safe Merge strategy (syncs missing files to SSD and frees local space).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target_key": { "type": "string" },
+                                "execute": { "type": "boolean", "default": false },
+                                "drive_path": { "type": "string" }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
+                        "name": "mso_repair_overwrite_external",
+                        "description": "Executes Overwrite External strategy (wipes SSD copy and re-copies fresh from Mac storage).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target_key": { "type": "string" },
+                                "execute": { "type": "boolean", "default": false },
+                                "drive_path": { "type": "string" }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
+                        "name": "mso_repair_discard_local",
+                        "description": "Executes Discard Local strategy (deletes local Mac folder and re-establishes symlink to SSD copy).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target_key": { "type": "string" },
+                                "execute": { "type": "boolean", "default": false },
+                                "drive_path": { "type": "string" }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
+                        "name": "mso_repair_rollback_to_local",
+                        "description": "Executes Rollback SSD Data strategy (copies SSD data back to Mac disk and deletes SSD copy).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target_key": { "type": "string" },
+                                "execute": { "type": "boolean", "default": false },
+                                "drive_path": { "type": "string" }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
+                        "name": "mso_repair_discard_external",
+                        "description": "Executes Discard External strategy (deletes SSD copy and keeps local Mac folder untouched).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target_key": { "type": "string" },
+                                "execute": { "type": "boolean", "default": false },
+                                "drive_path": { "type": "string" }
+                            },
+                            "required": ["target_key"]
+                        }
+                    },
+                    {
+                        "name": "mso_get_config",
+                        "description": "Reads saved configuration preferences from ~/.config/mso/config.json.",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
+                        "name": "mso_set_target_drive",
+                        "description": "Updates default external APFS volume mount path and subfolder location in configuration.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "drive_path": { "type": "string", "description": "User's manual external drive path" },
+                                "subfolder_path": { "type": "string", "description": "User's manual subfolder on drive" }
+                            },
+                            "required": ["drive_path"]
+                        }
+                    },
+                    {
+                        "name": "mso_reset_config",
+                        "description": "Resets configuration file to clean default state.",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
                     }
                 ]
             });
@@ -238,10 +382,25 @@ fn handle_mcp_request(req: &JsonRpcRequest) -> JsonRpcResponse {
             let progress_token = params.get("_meta").and_then(|m| m.get("progressToken")).cloned();
 
             match tool_name {
-                "mso_status" => handle_tool_status(req_id),
-                "mso_list_targets" => handle_tool_list_targets(req_id, &arguments),
-                "mso_diagnose" => handle_tool_diagnose(req_id),
+                "mso_status" | "mso_get_status" => handle_tool_status(req_id),
+                "mso_list_targets" | "mso_list_all_targets" => handle_tool_list_targets(req_id, &arguments),
+                "mso_list_disposable_targets" => handle_tool_list_disposable_targets(req_id),
+                "mso_list_package_registries" => handle_tool_list_package_registries(req_id),
+                "mso_diagnose" | "mso_diagnose_conflicts" => handle_tool_diagnose(req_id),
+                "mso_discover_ssd_caches" => handle_tool_discover_ssd_caches(req_id, &arguments),
                 "mso_offload_target" => handle_tool_offload_target(req_id, &arguments, progress_token),
+                "mso_offload_custom_folder" => handle_tool_offload_custom_folder(req_id, &arguments, progress_token),
+                "mso_offload_recommended" => handle_tool_offload_recommended(req_id, &arguments, progress_token),
+                "mso_restore_target" => handle_tool_restore_target(req_id, &arguments, false, progress_token),
+                "mso_restore_with_backup" => handle_tool_restore_target(req_id, &arguments, true, progress_token),
+                "mso_repair_merge" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::Merge, progress_token),
+                "mso_repair_overwrite_external" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::OverwriteExternal, progress_token),
+                "mso_repair_discard_local" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::DiscardLocal, progress_token),
+                "mso_repair_rollback_to_local" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::RollbackExternalToLocal, progress_token),
+                "mso_repair_discard_external" => handle_tool_repair_strategy(req_id, &arguments, ConflictStrategy::KeepLocalDiscardExternal, progress_token),
+                "mso_get_config" => handle_tool_get_config(req_id),
+                "mso_set_target_drive" => handle_tool_set_target_drive(req_id, &arguments),
+                "mso_reset_config" => handle_tool_reset_config(req_id),
                 _ => JsonRpcResponse {
                     jsonrpc: "2.0",
                     id: req_id,
@@ -749,6 +908,457 @@ fn handle_tool_offload_target(
     }
 }
 
+fn handle_tool_list_disposable_targets(req_id: Option<Value>) -> JsonRpcResponse {
+    let args = json!({ "category": "disposable" });
+    handle_tool_list_targets(req_id, &args)
+}
+
+fn handle_tool_list_package_registries(req_id: Option<Value>) -> JsonRpcResponse {
+    let args = json!({ "category": "package_registry" });
+    handle_tool_list_targets(req_id, &args)
+}
+
+fn handle_tool_discover_ssd_caches(req_id: Option<Value>, args: &Value) -> JsonRpcResponse {
+    let config = AppConfig::load();
+    let drives = discovery::discover_external_drives().unwrap_or_default();
+    let drive_path = args
+        .get("drive_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .or_else(|| config.last_external_drive.as_ref().map(std::path::PathBuf::from))
+        .or_else(|| drives.first().map(|d| d.volume_path.clone()));
+
+    let drive_path = match drive_path {
+        Some(p) => p,
+        None => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: "No external APFS drive specified".into(),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    let mut discovered = Vec::new();
+    for target in CacheTarget::all() {
+        if let Ok(info) = assessment::assess_target(&target, &drive_path) {
+            if matches!(info.state, PathState::ExistingExternalData { .. }) {
+                discovered.push(json!({
+                    "key": target.key(),
+                    "name": target.display_name(),
+                    "external_path": info.external_path.to_string_lossy(),
+                    "size_bytes": info.size_bytes,
+                    "size_human": format_bytes(info.size_bytes),
+                    "action_recommendation": "Discovered on SSD! Ready to re-bind symlink."
+                }));
+            }
+        }
+    }
+
+    let payload = json!({
+        "discovered_count": discovered.len(),
+        "discovered_caches": discovered
+    });
+
+    JsonRpcResponse {
+        jsonrpc: "2.0",
+        id: req_id,
+        result: Some(json!({
+            "content": [{"type": "text", "text": serde_json::to_string_pretty(&payload).unwrap_or_default()}]
+        })),
+        error: None,
+    }
+}
+
+fn handle_tool_offload_custom_folder(
+    req_id: Option<Value>,
+    args: &Value,
+    progress_token: Option<Value>,
+) -> JsonRpcResponse {
+    let custom_path_str = match args.get("custom_local_path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: "Missing custom_local_path argument".into(),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    let expanded_path = if custom_path_str.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(&custom_path_str[2..])
+        } else {
+            std::path::PathBuf::from(custom_path_str)
+        }
+    } else {
+        std::path::PathBuf::from(custom_path_str)
+    };
+
+    if !expanded_path.exists() || !expanded_path.is_dir() {
+        return JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: req_id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: format!("Custom path '{}' does not exist or is not a directory.", expanded_path.display()),
+                data: None,
+            }),
+        };
+    }
+
+    let name = args
+        .get("custom_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            expanded_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("CustomFolder")
+        })
+        .to_string();
+
+    let custom_target = CacheTarget::Custom {
+        name: name.clone(),
+        local_rel_path: expanded_path.clone(),
+    };
+
+    let target_key = custom_target.key();
+    let mut modified_args = args.clone();
+    if let Some(obj) = modified_args.as_object_mut() {
+        obj.insert("target_key".to_string(), json!(target_key));
+    }
+
+    handle_tool_offload_target(req_id, &modified_args, progress_token)
+}
+
+fn handle_tool_offload_recommended(
+    req_id: Option<Value>,
+    args: &Value,
+    progress_token: Option<Value>,
+) -> JsonRpcResponse {
+    let execute = args.get("execute").and_then(|v| v.as_bool()).unwrap_or(false);
+    let mut offload_results = Vec::new();
+
+    for target in CacheTarget::all().into_iter().filter(|t| t.is_build_output()) {
+        let mut target_args = args.clone();
+        if let Some(obj) = target_args.as_object_mut() {
+            obj.insert("target_key".to_string(), json!(target.key()));
+            obj.insert("execute".to_string(), json!(execute));
+        }
+
+        let resp = handle_tool_offload_target(req_id.clone(), &target_args, progress_token.clone());
+        if resp.error.is_none() {
+            offload_results.push(resp.result);
+        }
+    }
+
+    let payload = json!({
+        "batch_offload": true,
+        "execute": execute,
+        "processed_count": offload_results.len(),
+        "results": offload_results
+    });
+
+    JsonRpcResponse {
+        jsonrpc: "2.0",
+        id: req_id,
+        result: Some(json!({
+            "content": [{"type": "text", "text": serde_json::to_string_pretty(&payload).unwrap_or_default()}]
+        })),
+        error: None,
+    }
+}
+
+fn handle_tool_restore_target(
+    req_id: Option<Value>,
+    args: &Value,
+    force_keep_external: bool,
+    _progress_token: Option<Value>,
+) -> JsonRpcResponse {
+    let target_key = match args.get("target_key").and_then(|v| v.as_str()) {
+        Some(k) => k,
+        None => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: "Missing target_key argument".into(),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    let execute = args.get("execute").and_then(|v| v.as_bool()).unwrap_or(false);
+    let keep_external = force_keep_external || args.get("keep_external").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let target = match CacheTarget::all().into_iter().find(|t| t.key() == target_key) {
+        Some(t) => t,
+        None => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Unknown target_key '{}'", target_key),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    let config = AppConfig::load();
+    let drives = discovery::discover_external_drives().unwrap_or_default();
+    let drive_path = config
+        .last_external_drive
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .or_else(|| drives.first().map(|d| d.volume_path.clone()))
+        .unwrap_or_else(|| std::path::PathBuf::from("/Volumes/ExternalSSD"));
+
+    let info = match assessment::assess_target(&target, &drive_path) {
+        Ok(i) => i,
+        Err(e) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!("Assessment failed: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    // Evaluate 10GB disk space safety buffer
+    let avail_bytes = crate::ui::get_mac_available_space_bytes().unwrap_or(u64::MAX);
+    let required_with_buffer = info.size_bytes + 10_000_000_000;
+    if avail_bytes != u64::MAX && required_with_buffer > avail_bytes {
+        return JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: req_id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32003, // Implementation-defined error: Insufficient space
+                message: format!(
+                    "Insufficient local Mac space to restore '{}'. Required: {} (target size {}) + 10GB safety buffer, Available: {}.",
+                    target.display_name(),
+                    format_bytes(required_with_buffer),
+                    format_bytes(info.size_bytes),
+                    format_bytes(avail_bytes)
+                ),
+                data: None,
+            }),
+        };
+    }
+
+    if !execute {
+        {
+            let mut previewed = previewed_restores().lock().unwrap_or_else(|e| e.into_inner());
+            previewed.insert(target_key.to_string());
+        }
+
+        let preview = json!({
+            "dry_run": true,
+            "target_key": target.key(),
+            "target_name": target.display_name(),
+            "restore_bytes": info.size_bytes,
+            "restore_human": format_bytes(info.size_bytes),
+            "mac_available_bytes": avail_bytes,
+            "mac_available_human": format_bytes(avail_bytes),
+            "keep_external_copy": keep_external,
+            "warning": format!(
+                "This will copy {} ({}) from external SSD back to local Mac storage and remove the symlink. Re-call with execute: true to commit.",
+                target.display_name(),
+                format_bytes(info.size_bytes)
+            )
+        });
+        return JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: req_id,
+            result: Some(json!({
+                "content": [{"type": "text", "text": serde_json::to_string_pretty(&preview).unwrap_or_default()}]
+            })),
+            error: None,
+        };
+    }
+
+    {
+        let previewed = previewed_restores().lock().unwrap_or_else(|e| e.into_inner());
+        if !previewed.contains(target_key) {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32002,
+                    message: format!("Dry-run preview required prior to restore execution for '{}'.", target_key),
+                    data: None,
+                }),
+            };
+        }
+    }
+
+    let result = migrator::restore_target(&info, keep_external, false, false);
+
+    {
+        let mut previewed = previewed_restores().lock().unwrap_or_else(|e| e.into_inner());
+        previewed.remove(target_key);
+    }
+
+    match result {
+        Ok(_) => {
+            let res = json!({
+                "success": true,
+                "target_key": target.key(),
+                "target_name": target.display_name(),
+                "restored_bytes": info.size_bytes,
+                "restored_human": format_bytes(info.size_bytes),
+                "keep_external": keep_external,
+                "message": format!("Successfully restored {} back to local Mac storage.", target.display_name())
+            });
+            JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: Some(json!({
+                    "content": [{"type": "text", "text": serde_json::to_string_pretty(&res).unwrap_or_default()}]
+                })),
+                error: None,
+            }
+        }
+        Err(e) => JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: req_id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32603,
+                message: format!("Restore failed for '{}': {}", target.key(), e),
+                data: None,
+            }),
+        },
+    }
+}
+
+fn handle_tool_repair_strategy(
+    req_id: Option<Value>,
+    args: &Value,
+    strategy: ConflictStrategy,
+    progress_token: Option<Value>,
+) -> JsonRpcResponse {
+    let mut modified_args = args.clone();
+    let strat_name = match strategy {
+        ConflictStrategy::Merge => "merge",
+        ConflictStrategy::OverwriteExternal => "overwrite_external",
+        ConflictStrategy::DiscardLocal => "discard_local",
+        ConflictStrategy::KeepLocalDiscardExternal => "discard_external",
+        ConflictStrategy::RollbackExternalToLocal => "rollback_to_local",
+    };
+
+    if let Some(obj) = modified_args.as_object_mut() {
+        obj.insert("conflict_strategy".to_string(), json!(strat_name));
+    }
+
+    handle_tool_offload_target(req_id, &modified_args, progress_token)
+}
+
+fn handle_tool_get_config(req_id: Option<Value>) -> JsonRpcResponse {
+    let config = AppConfig::load();
+    let payload = json!({
+        "config_path": "~/.config/mso/config.json",
+        "last_external_drive": config.last_external_drive,
+        "remembered_targets": config.remembered_targets
+    });
+
+    JsonRpcResponse {
+        jsonrpc: "2.0",
+        id: req_id,
+        result: Some(json!({
+            "content": [{"type": "text", "text": serde_json::to_string_pretty(&payload).unwrap_or_default()}]
+        })),
+        error: None,
+    }
+}
+
+fn handle_tool_set_target_drive(req_id: Option<Value>, args: &Value) -> JsonRpcResponse {
+    let drive_path = match args.get("drive_path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: "Missing drive_path argument".into(),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    let mut config = AppConfig::load();
+    config.last_external_drive = Some(drive_path.to_string());
+    let _ = config.save();
+
+    let payload = json!({
+        "success": true,
+        "saved_drive": drive_path,
+        "message": format!("Successfully saved target drive path to configuration: {}", drive_path)
+    });
+
+    JsonRpcResponse {
+        jsonrpc: "2.0",
+        id: req_id,
+        result: Some(json!({
+            "content": [{"type": "text", "text": serde_json::to_string_pretty(&payload).unwrap_or_default()}]
+        })),
+        error: None,
+    }
+}
+
+fn handle_tool_reset_config(req_id: Option<Value>) -> JsonRpcResponse {
+    let config_path = match dirs::config_dir() {
+        Some(dir) => dir.join("mso").join("config.json"),
+        None => std::path::PathBuf::from("~/.config/mso/config.json"),
+    };
+
+    if config_path.exists() {
+        let _ = std::fs::remove_file(&config_path);
+    }
+
+    let payload = json!({
+        "success": true,
+        "message": "Successfully reset mso configuration to default."
+    });
+
+    JsonRpcResponse {
+        jsonrpc: "2.0",
+        id: req_id,
+        result: Some(json!({
+            "content": [{"type": "text", "text": serde_json::to_string_pretty(&payload).unwrap_or_default()}]
+        })),
+        error: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -790,7 +1400,7 @@ mod tests {
                 "name": "mso_offload_target",
                 "arguments": {
                     "target_key": "derived-data",
-                    "drive_path": "/Volumes/MacData"
+                    "drive_path": "/"
                 }
             })),
         };
@@ -820,7 +1430,7 @@ mod tests {
                 "arguments": {
                     "target_key": "coresimulator",
                     "execute": true,
-                    "drive_path": "/Volumes/MacData"
+                    "drive_path": "/"
                 }
             })),
         };
@@ -848,12 +1458,27 @@ mod tests {
 
         let res = resp.result.unwrap();
         let tools = res["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 22);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert!(names.contains(&"mso_status"));
-        assert!(names.contains(&"mso_list_targets"));
-        assert!(names.contains(&"mso_diagnose"));
+        assert!(names.contains(&"mso_get_status"));
+        assert!(names.contains(&"mso_list_all_targets"));
+        assert!(names.contains(&"mso_list_disposable_targets"));
+        assert!(names.contains(&"mso_list_package_registries"));
+        assert!(names.contains(&"mso_diagnose_conflicts"));
+        assert!(names.contains(&"mso_discover_ssd_caches"));
         assert!(names.contains(&"mso_offload_target"));
+        assert!(names.contains(&"mso_offload_custom_folder"));
+        assert!(names.contains(&"mso_offload_recommended"));
+        assert!(names.contains(&"mso_restore_target"));
+        assert!(names.contains(&"mso_restore_with_backup"));
+        assert!(names.contains(&"mso_repair_merge"));
+        assert!(names.contains(&"mso_repair_overwrite_external"));
+        assert!(names.contains(&"mso_repair_discard_local"));
+        assert!(names.contains(&"mso_repair_rollback_to_local"));
+        assert!(names.contains(&"mso_repair_discard_external"));
+        assert!(names.contains(&"mso_get_config"));
+        assert!(names.contains(&"mso_set_target_drive"));
+        assert!(names.contains(&"mso_reset_config"));
     }
 }

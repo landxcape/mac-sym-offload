@@ -5,6 +5,18 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-02
+
+### Added
+- **Complete 19-Tool MCP Suite**: Expanded MCP server over stdio to achieve 100% feature parity with the native CLI and interactive TUI wizard.
+- **5 Tool Groups Exposed to AI Agents**:
+  1. **Telemetry & Discovery**: `mso_get_status`, `mso_list_all_targets`, `mso_list_disposable_targets`, `mso_list_package_registries`, `mso_diagnose_conflicts`, `mso_discover_ssd_caches`.
+  2. **Offloading & Migration**: `mso_offload_target`, `mso_offload_custom_folder` (user manual custom local paths), `mso_offload_recommended` (disposable build outputs batch).
+  3. **Reverse Restore Engine**: `mso_restore_target` (10GB disk space safety gate), `mso_restore_with_backup` (`--keep-external`).
+  4. **Conflict & Repair Strategies**: `mso_repair_merge`, `mso_repair_overwrite_external`, `mso_repair_discard_local`, `mso_repair_rollback_to_local`, `mso_repair_discard_external`.
+  5. **Config & Drive Management**: `mso_get_config`, `mso_set_target_drive` (user manual drive & subfolder path), `mso_reset_config`.
+- **Manual User Input Parameters**: Added explicit schema parameters (`custom_local_path`, `drive_path`, `subfolder_path`) for AI agents to pass human-entered paths.
+
 ## [0.2.2] - 2026-08-01
 
 ### Added
