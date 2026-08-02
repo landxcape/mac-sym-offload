@@ -5,6 +5,11 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-02
+
+### Fixed
+- **Antigravity Active MCP Config Path (`~/.gemini/config/mcp_config.json`)**: Updated `setup_antigravity` to write `mso` directly into `~/.gemini/config/mcp_config.json` (the exact location Antigravity CLI uses to inject active MCP tools into AI agent sessions).
+
 ## [0.4.0] - 2026-08-02
 
 ### Fixed & Enhanced

@@ -75,7 +75,7 @@ impl AiClientKind {
                     .join("cline_mcp_settings.json"),
             ),
             AiClientKind::Antigravity => {
-                Some(home.join(".gemini").join("antigravity-cli").join("mcp").join("mso"))
+                Some(home.join(".gemini").join("config").join("mcp_config.json"))
             }
             AiClientKind::Custom(p) => Some(p.clone()),
         }
@@ -278,36 +278,46 @@ When executing data relocation (`mso_offload_target`, `mso_offload_custom_folder
 
         // Also update mcp_config.json for Antigravity stdio protocol
         if let Some(home) = dirs::home_dir() {
-            let mcp_config_path = home.join(".gemini").join("antigravity-cli").join("mcp_config.json");
-            let doc: Value = if mcp_config_path.exists() {
-                let content = fs::read_to_string(&mcp_config_path).unwrap_or_default();
-                serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-            } else {
-                json!({})
-            };
+            let mcp_config_paths = vec![
+                home.join(".gemini").join("config").join("mcp_config.json"),
+                home.join(".gemini").join("antigravity-cli").join("mcp_config.json"),
+            ];
 
-            let mut obj_map = match doc {
-                Value::Object(m) => m,
-                _ => serde_json::Map::new(),
-            };
+            for mcp_config_path in mcp_config_paths {
+                if let Some(parent) = mcp_config_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let doc: Value = if mcp_config_path.exists() {
+                    let content = fs::read_to_string(&mcp_config_path).unwrap_or_default();
+                    serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({})
+                };
 
-            let mcp_servers = obj_map
-                .entry("mcpServers".to_string())
-                .or_insert_with(|| json!({}));
+                let mut obj_map = match doc {
+                    Value::Object(m) => m,
+                    _ => serde_json::Map::new(),
+                };
 
-            if !mcp_servers.is_object() {
-                *mcp_servers = json!({});
+                let mcp_servers = obj_map
+                    .entry("mcpServers".to_string())
+                    .or_insert_with(|| json!({}));
+
+                if !mcp_servers.is_object() {
+                    *mcp_servers = json!({});
+                }
+
+                mcp_servers.as_object_mut().unwrap().insert(
+                    "mso".to_string(),
+                    json!({
+                        "command": mso_exe.clone(),
+                        "args": ["mcp"],
+                        "env": {}
+                    }),
+                );
+
+                let _ = fs::write(mcp_config_path, serde_json::to_string_pretty(&Value::Object(obj_map))?);
             }
-
-            mcp_servers.as_object_mut().unwrap().insert(
-                "mso".to_string(),
-                json!({
-                    "command": mso_exe,
-                    "args": ["mcp"]
-                }),
-            );
-
-            let _ = fs::write(mcp_config_path, serde_json::to_string_pretty(&Value::Object(obj_map))?);
         }
 
         return Ok(format!(
