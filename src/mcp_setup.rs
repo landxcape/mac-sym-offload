@@ -243,20 +243,37 @@ When executing data relocation (`mso_offload_target`, `mso_offload_custom_folder
             ("mso_reset_config", "Resets CLI configuration to default."),
         ];
 
-        for (name, desc) in schemas {
-            let schema_json = json!({
-                "name": name,
-                "description": desc,
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            });
-            fs::write(
-                dir.join(format!("{}.json", name)),
-                serde_json::to_string_pretty(&schema_json)?,
-            )?;
+        let target_dirs = if let Some(parent) = dir.parent() {
+            vec![
+                parent.join("mso"),
+                parent.join("mac-sym-offload"),
+                parent.join("MacSymOffload"),
+            ]
+        } else {
+            vec![dir.clone()]
+        };
+
+        for target_dir in &target_dirs {
+            if !target_dir.exists() {
+                let _ = fs::create_dir_all(target_dir);
+            }
+            let _ = fs::write(target_dir.join("instructions.md"), instructions_content);
+
+            for (name, desc) in schemas {
+                let schema_json = json!({
+                    "name": name,
+                    "description": desc,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                });
+                let _ = fs::write(
+                    target_dir.join(format!("{}.json", name)),
+                    serde_json::to_string_pretty(&schema_json).unwrap_or_default(),
+                );
+            }
         }
 
         // Also update mcp_config.json for Antigravity stdio protocol

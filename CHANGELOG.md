@@ -5,6 +5,12 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-02
+
+### Fixed & Enhanced
+- **Multi-Alias Antigravity Setup**: Updated `setup_antigravity` in `mso mcp setup` to automatically populate schemas across all server aliases (`~/.gemini/antigravity-cli/mcp/mso`, `mac-sym-offload`, and `MacSymOffload`) alongside `mcp_config.json`.
+- **Guaranteed Stdio & Schema Tool Registration**: Ensures Antigravity CLI indexes native MCP tools cleanly regardless of tool lookup casing or alias.
+
 ## [0.3.9] - 2026-08-02
 
 ### Fixed & Enhanced
