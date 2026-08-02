@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-08-02
+
+### Fixed
+- **MCP Tool Conflict Strategy Matching**: Fixed bug in `handle_tool_offload_target` where `conflict_strategy` string parsing only recognized `overwrite_external` and `discard_local`, defaulting all other strategies (including `rollback_to_local`, `relink`, and `discard_external`) to `merge`.
+- **MCP Stdio End-to-End Verification**: Verified `mso_repair_rollback_to_local` via live JSON-RPC stdio protocol. The tool now returns the correct restore warning and restores local files from external SSD.
+- **Automated MCP Unit Test**: Added `test_mcp_rollback_to_local_dry_run` to prevent regression.
+
 ## [0.3.7] - 2026-08-02
 
 ### Fixed & Refactored

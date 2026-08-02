@@ -719,6 +719,9 @@ fn handle_tool_offload_target(
     let conflict_strat = match strat_str {
         "overwrite_external" => ConflictStrategy::OverwriteExternal,
         "discard_local" => ConflictStrategy::DiscardLocal,
+        "rollback_to_local" | "rollback_external_to_local" => ConflictStrategy::RollbackExternalToLocal,
+        "relink" => ConflictStrategy::Relink,
+        "discard_external" | "keep_local_discard_external" => ConflictStrategy::KeepLocalDiscardExternal,
         _ => ConflictStrategy::Merge,
     };
 
@@ -1574,5 +1577,32 @@ mod tests {
         assert!(names.contains(&"mso_get_config"));
         assert!(names.contains(&"mso_set_target_drive"));
         assert!(names.contains(&"mso_reset_config"));
+    }
+
+    #[test]
+    fn test_mcp_rollback_to_local_dry_run() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(5)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_repair_rollback_to_local",
+                "arguments": {
+                    "target_key": "coresimulator",
+                    "execute": false,
+                    "drive_path": "/"
+                }
+            })),
+        };
+
+        let resp = handle_mcp_request(&req);
+        assert_eq!(resp.jsonrpc, "2.0");
+        assert_eq!(resp.id, Some(json!(5)));
+
+        let res = resp.result.unwrap();
+        let text = res["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("rollback_to_local"));
+        assert!(text.contains("restore"));
+        assert!(text.contains("from external SSD back to local Mac storage"));
     }
 }
