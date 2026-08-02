@@ -3,13 +3,14 @@ mod cli;
 mod config;
 mod discovery;
 mod mcp;
+mod mcp_setup;
 mod migrator;
 mod models;
 mod ui;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use cli::{Cli, CliConflictStrategy, Commands};
+use cli::{Cli, CliConflictStrategy, Commands, McpSubcommand};
 use config::AppConfig;
 use console::style;
 use discovery::ExternalDrive;
@@ -24,7 +25,11 @@ fn main() -> Result<()> {
 
     match cli.command {
         None => run_interactive_tui(cli.verbose),
-        Some(Commands::Mcp) => mcp::run_mcp_server(),
+        Some(Commands::Mcp { action }) => match action {
+            None | Some(McpSubcommand::Run) => mcp::run_mcp_server(),
+            Some(McpSubcommand::Setup { overwrite }) => mcp_setup::run_mcp_setup_wizard(overwrite),
+            Some(McpSubcommand::Status { json }) => mcp_setup::run_mcp_status(json),
+        },
         Some(Commands::Scan { json }) => run_scan_command(json),
         Some(Commands::Migrate {
             targets,

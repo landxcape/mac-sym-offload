@@ -183,24 +183,40 @@ mso config --reset
 ```
 
 ### 8. Model Context Protocol (MCP) Server for AI Assistants
-`mso` includes a native Model Context Protocol (MCP) server that communicates over `stdio` using JSON-RPC 2.0. This allows AI assistants (Claude Desktop, Antigravity, Cursor, VS Code) to inspect developer storage, scan targets, diagnose broken links, offload build caches, restore targets, and repair conflicts.
+`mso` includes a native Model Context Protocol (MCP) server that communicates over `stdio` using JSON-RPC 2.0. This allows AI assistants (OpenAI Codex, Claude Desktop, Cursor, VS Code, Google Antigravity) to inspect developer storage, scan targets, diagnose broken links, offload build caches, restore targets, and repair conflicts.
 
-Run the server over stdio:
+#### 🚀 Method A: Automatic 1-Click Setup (Recommended)
+Run the built-in setup wizard to auto-detect installed AI clients on your Mac and configure `mso`:
 ```bash
-mso mcp
-```
+# Launch interactive setup wizard (detects Codex, Claude, Cursor, Antigravity, VS Code):
+mso mcp setup
 
-Add `mso` to your AI client configuration (e.g. `claude_desktop_config.json` or Antigravity MCP settings):
+# Or check current AI client configuration status:
+mso mcp status
+```
+> **🛡️ Zero-Distruption Guarantee**: Automatic mode safely parses your existing client JSON files (`claude_desktop_config.json`, `mcp.json`, etc.), inserts/updates ONLY the `"mso"` key inside `"mcpServers"`, and leaves all your other existing MCP servers (`github`, `fetch`, `postgres`, etc.) **100% untouched and intact**.
+
+#### 🛠️ Method B: Manual Configuration
+If you prefer manual configuration, add the following entry to your AI client's configuration file:
+
+* **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+* **Codex**: `~/.codex/config.json` or `~/.config/codex/mcp.json`
+* **Cursor**: `~/.cursor/mcp.json`
+* **VS Code (Cline / Roo)**: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+
 ```json
 {
   "mcpServers": {
     "mso": {
-      "command": "mso",
+      "command": "/opt/homebrew/bin/mso",
       "args": ["mcp"]
     }
   }
 }
 ```
+
+* **Google Antigravity CLI / IDE**:
+  Schemas and instructions are loaded from `~/.gemini/antigravity-cli/mcp/mso/`. Run `mso mcp setup` to generate the schema directory automatically.
 
 #### ⚠️ Explicit User Confirmation Protocol for AI Agents
 When AI assistants perform data relocation or restore operations (`mso_offload_target`, `mso_offload_custom_folder`, `mso_restore_target`), they follow a mandatory **2-Step Confirmation Protocol**:

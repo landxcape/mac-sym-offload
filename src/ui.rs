@@ -387,6 +387,7 @@ pub fn prompt_targets_to_migrate(
         options.push("[+] Select All Components".to_string());
         options.push("[-] Select None (Clear All Checkboxes)".to_string());
         options.push("+ Add Custom Local Folder Path to Offload...".to_string());
+        options.push("🤖 Auto-Configure MCP for AI Assistants (Codex, Claude, Cursor, Antigravity)...".to_string());
         options.push("↻ Force Rescan Local & SSD Caches...".to_string());
         options.push("‹ Back to Subfolder Selection (Step 2)".to_string());
 
@@ -485,6 +486,11 @@ pub fn prompt_targets_to_migrate(
                     );
                 }
             }
+            return Ok(StepResult::Rescan);
+        }
+
+        if selected_choice.starts_with("🤖 Auto-Configure MCP") {
+            let _ = crate::mcp_setup::run_mcp_setup_wizard(false);
             return Ok(StepResult::Rescan);
         }
 

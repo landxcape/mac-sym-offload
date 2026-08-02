@@ -88,8 +88,29 @@ pub enum Commands {
         #[arg(long)]
         reset: bool,
     },
-    /// Start Model Context Protocol (MCP) server over stdio for AI integration
-    Mcp,
+    /// Start Model Context Protocol (MCP) server or configure AI clients (Codex, Claude, Cursor, Antigravity)
+    Mcp {
+        #[command(subcommand)]
+        action: Option<McpSubcommand>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum McpSubcommand {
+    /// Run MCP JSON-RPC server over stdio for AI integration (default)
+    Run,
+    /// Interactive wizard to auto-detect and configure MCP for AI clients (Codex, Claude, Cursor, Antigravity, VS Code)
+    Setup {
+        /// Force overwrite existing mso configuration without prompting
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Scan system for installed AI clients and check mso configuration status
+    Status {
+        /// Output scan result in JSON format
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
