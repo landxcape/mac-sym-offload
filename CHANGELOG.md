@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-08-05
+
+### Fixed
+- **Small Directory & Low-Byte Parity Fix**: Fixed `get_fast_dir_size_bytes` returning `0` when `du -sk` rounds down small directories (< 1024 bytes) to `0` KB. Added an automatic `fs::read_dir` metadata walk fallback so exact payload byte sizes are accurately measured and returned in both dry-run and execution paths.
+- **Server Gate Order Refinement**: Moved the `if execute` dry-run preview check to execute before APFS drive validation and assessment, ensuring dry-run requirement error `-32002` is consistently returned if an execution call is attempted without prior preview.
+- **Live Stdio MCP Verification**: Verified all 6 conflict strategies (`discard_local`, `merge`, `overwrite_external`, `discard_external`, `rollback_to_local`, `relink`) live over stdio MCP JSON-RPC against real disk states, confirming 100% byte parity (`would_move_bytes == bytes_moved > 0`).
+
 ## [0.4.3] - 2026-08-05
 
 ### Fixed

@@ -116,16 +116,36 @@ pub fn get_fast_dir_size_bytes(path: &Path) -> Option<u64> {
         return Some(0);
     }
 
-    let output = Command::new("du").arg("-sk").arg(path).output().ok()?;
-
-    if !output.status.success() {
-        return None;
+    if let Ok(output) = Command::new("du").arg("-sk").arg(path).output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(first_word) = stdout.split_whitespace().next() {
+                if let Ok(kb) = first_word.parse::<u64>() {
+                    if kb > 0 {
+                        return Some(kb * 1024);
+                    }
+                }
+            }
+        }
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let first_word = stdout.split_whitespace().next()?;
-    let kb: u64 = first_word.parse().ok()?;
-    Some(kb * 1024)
+    // Fallback for small directories (< 1KB) or du failures: metadata walk
+    let mut total_bytes: u64 = 0;
+    if path.is_file() {
+        return path.metadata().ok().map(|m| m.len());
+    }
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    total_bytes += meta.len();
+                } else if meta.is_dir() {
+                    total_bytes += get_fast_dir_size_bytes(&entry.path()).unwrap_or(0);
+                }
+            }
+        }
+    }
+    Some(total_bytes)
 }
 
 #[cfg(test)]

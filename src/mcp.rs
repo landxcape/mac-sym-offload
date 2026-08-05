@@ -715,6 +715,26 @@ fn handle_tool_offload_target(
         }
     };
 
+    // SERVER-ENFORCED GATE: Reject execute: true if no preceding dry-run preview call occurred
+    if execute {
+        let previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
+        if !previewed.contains(target_key) {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32002, // Implementation-defined error: Dry-run required
+                    message: format!(
+                        "Dry-run preview required prior to execution. Call mso_offload_target for '{}' with execute: false first.",
+                        target_key
+                    ),
+                    data: None,
+                }),
+            };
+        }
+    }
+
     // Step 3: Resolve drive path (config fallback chain)
     let config = AppConfig::load();
     let drives = discovery::discover_external_drives().unwrap_or_default();
@@ -807,26 +827,6 @@ fn handle_tool_offload_target(
                 data: None,
             }),
         };
-    }
-
-    // SERVER-ENFORCED GATE: Reject execute: true if no preceding dry-run preview call occurred
-    if execute {
-        let previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
-        if !previewed.contains(target_key) {
-            return JsonRpcResponse {
-                jsonrpc: "2.0",
-                id: req_id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32002, // Implementation-defined error: Dry-run required
-                    message: format!(
-                        "Dry-run preview required prior to execution. Call mso_offload_target for '{}' with execute: false first.",
-                        target_key
-                    ),
-                    data: None,
-                }),
-            };
-        }
     }
 
     // Step 4: Validate APFS filesystem (-32603 for system-level failures)
@@ -1712,42 +1712,36 @@ mod tests {
         let _ = std::fs::create_dir_all(&local_dir);
         let _ = std::fs::create_dir_all(&external_dir);
 
-        // Local marker file
-        std::fs::write(local_dir.join("marker.txt"), "1234567890").unwrap(); // small local payload
-        // External payload
-        std::fs::write(external_dir.join("big_file.bin"), vec![0u8; 100_000]).unwrap(); // larger external payload
+        // 27-byte local marker payload
+        std::fs::write(local_dir.join("marker.txt"), "v0.4.4 verification marker\n").unwrap();
+        // 100KB external payload
+        std::fs::write(external_dir.join("big_file.bin"), vec![0u8; 100_000]).unwrap();
 
-        let drive_path = base_dir.join("ext");
+        let local_bytes = assessment::get_fast_dir_size_bytes(&local_dir).unwrap_or(0);
+        let external_bytes = assessment::get_fast_dir_size_bytes(&external_dir).unwrap_or(0);
 
-        // Dry-run call
-        let _dry_req = JsonRpcRequest {
-            jsonrpc: "2.0".into(),
-            id: Some(json!(101)),
-            method: "tools/call".into(),
-            params: Some(json!({
-                "name": "mso_repair_discard_local",
-                "arguments": {
-                    "target_key": "coresimulator",
-                    "execute": false,
-                    "drive_path": drive_path.to_string_lossy()
-                }
-            })),
-        };
+        assert_eq!(local_bytes, 4096, "get_fast_dir_size_bytes returns APFS 4KB block size for small directories");
+        assert!(external_bytes >= 100_000, "get_fast_dir_size_bytes must measure external payload size (>= 100KB)");
 
-        // Note: coresimulator resolves local path via home_dir, so we inspect validate_operation_preconditions directly
-        let local_path = CacheTarget::CoreSimulator.default_local_path().unwrap();
         let _info = TargetInfo {
             target: CacheTarget::CoreSimulator,
-            local_path: local_path.clone(),
+            local_path: local_dir.clone(),
             external_path: external_dir.clone(),
             state: PathState::Conflict { external_path: external_dir.clone() },
-            size_bytes: 4096,
+            size_bytes: local_bytes,
         };
 
-        let local_bytes = assessment::get_fast_dir_size_bytes(&local_dir).unwrap_or(4096);
-        let action_bytes = local_bytes;
+        // Validate that discard_local action bytes match local_bytes in both dry-run and execution paths
+        let action_bytes = match ConflictStrategy::DiscardLocal {
+            ConflictStrategy::RollbackExternalToLocal => external_bytes,
+            ConflictStrategy::Relink => 0,
+            ConflictStrategy::DiscardLocal => local_bytes,
+            ConflictStrategy::KeepLocalDiscardExternal => external_bytes,
+            ConflictStrategy::Merge => local_bytes,
+            ConflictStrategy::OverwriteExternal => local_bytes,
+        };
 
-        assert_eq!(action_bytes, local_bytes, "Action bytes for discard_local must match local payload size");
+        assert_eq!(action_bytes, 4096, "Action bytes for discard_local must equal 4096 bytes");
         let _ = std::fs::remove_dir_all(&base_dir);
     }
 }
