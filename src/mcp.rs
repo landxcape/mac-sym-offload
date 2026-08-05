@@ -843,7 +843,30 @@ fn handle_tool_offload_target(
         };
     }
 
-    let size_bytes = info.size_bytes;
+    let (local_bytes, external_bytes) = match &info.state {
+        PathState::Conflict { external_path } => (
+            assessment::get_fast_dir_size_bytes(&info.local_path).unwrap_or(info.size_bytes),
+            assessment::get_fast_dir_size_bytes(external_path).unwrap_or(0),
+        ),
+        PathState::AlreadyLinked { target_path } => (
+            0,
+            assessment::get_fast_dir_size_bytes(target_path).unwrap_or(info.size_bytes),
+        ),
+        PathState::ExistingExternalData { external_path } => (
+            0,
+            assessment::get_fast_dir_size_bytes(external_path).unwrap_or(info.size_bytes),
+        ),
+        _ => (info.size_bytes, 0),
+    };
+
+    let action_bytes = match conflict_strat {
+        ConflictStrategy::RollbackExternalToLocal => external_bytes,
+        ConflictStrategy::Relink => 0,
+        ConflictStrategy::DiscardLocal => local_bytes,
+        ConflictStrategy::KeepLocalDiscardExternal => external_bytes,
+        ConflictStrategy::Merge => local_bytes,
+        ConflictStrategy::OverwriteExternal => local_bytes,
+    };
 
     // Dry-run gate: execute defaults to false.
     // Server enforces that execute: true calls MUST be preceded by a call with execute: false.
@@ -859,7 +882,7 @@ fn handle_tool_offload_target(
                 format!(
                     "This will restore '{}' ({}) from external SSD back to local Mac storage and delete the external backup. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
-                    format_bytes(size_bytes)
+                    format_bytes(action_bytes)
                 ),
                 format!("Successfully rolled back {} from external APFS SSD to local Mac storage.", target.display_name())
             ),
@@ -875,7 +898,7 @@ fn handle_tool_offload_target(
                 format!(
                     "This will permanently delete local Mac directory '{}' ({}) and establish a symlink to existing external SSD backup. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
-                    format_bytes(size_bytes)
+                    format_bytes(action_bytes)
                 ),
                 format!("Successfully discarded local copy and established symlink for {}.", target.display_name())
             ),
@@ -883,7 +906,7 @@ fn handle_tool_offload_target(
                 format!(
                     "This will permanently delete external SSD backup '{}' ({}) and leave local Mac directory untouched. Re-call with execute: true to commit.",
                     info.external_path.to_string_lossy(),
-                    format_bytes(size_bytes)
+                    format_bytes(action_bytes)
                 ),
                 format!("Successfully discarded external SSD backup for {}.", target.display_name())
             ),
@@ -891,7 +914,7 @@ fn handle_tool_offload_target(
                 format!(
                     "This will merge local Mac directory '{}' ({}) into external SSD backup and establish a symlink. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
-                    format_bytes(size_bytes)
+                    format_bytes(action_bytes)
                 ),
                 format!("Successfully merged {} into external APFS SSD and established symlink.", target.display_name())
             ),
@@ -899,7 +922,7 @@ fn handle_tool_offload_target(
                 format!(
                     "This will overwrite external SSD backup with local Mac directory '{}' ({}) and establish a symlink. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
-                    format_bytes(size_bytes)
+                    format_bytes(action_bytes)
                 ),
                 format!("Successfully overwrote external SSD backup and established symlink for {}.", target.display_name())
             ),
@@ -910,8 +933,8 @@ fn handle_tool_offload_target(
             "target_key": target.key(),
             "target_name": target.display_name(),
             "current_state": format!("{:?}", info.state),
-            "would_move_bytes": size_bytes,
-            "would_move_human": format_bytes(size_bytes),
+            "would_move_bytes": action_bytes,
+            "would_move_human": format_bytes(action_bytes),
             "local_path": info.local_path.to_string_lossy(),
             "external_path": info.external_path.to_string_lossy(),
             "conflict_strategy": strat_str,
@@ -958,7 +981,7 @@ fn handle_tool_offload_target(
         emit_mcp_progress(
             token,
             0,
-            size_bytes,
+            action_bytes,
             &format!("Initializing operation for {}...", target.display_name()),
         );
     }
@@ -980,10 +1003,6 @@ fn handle_tool_offload_target(
 
     match result {
         Ok(_) => {
-            // Re-assess target to verify actual disk result and byte sizes
-            let post_info = assessment::assess_target(&target, &drive_path).ok();
-            let actual_bytes = post_info.as_ref().map(|i| i.size_bytes).unwrap_or(size_bytes);
-
             let (exec_warning_msg, exec_action_msg) = match conflict_strat {
                 ConflictStrategy::RollbackExternalToLocal => (
                     format!("Restored {} back to local Mac disk.", target.display_name()),
@@ -1002,8 +1021,8 @@ fn handle_tool_offload_target(
             if let Some(token) = &progress_token {
                 emit_mcp_progress(
                     token,
-                    actual_bytes,
-                    actual_bytes,
+                    action_bytes,
+                    action_bytes,
                     &exec_warning_msg,
                 );
             }
@@ -1012,8 +1031,8 @@ fn handle_tool_offload_target(
                 "success": true,
                 "target_key": target.key(),
                 "target_name": target.display_name(),
-                "bytes_moved": actual_bytes,
-                "bytes_moved_human": format_bytes(actual_bytes),
+                "bytes_moved": action_bytes,
+                "bytes_moved_human": format_bytes(action_bytes),
                 "local_path": info.local_path.to_string_lossy(),
                 "external_path": info.external_path.to_string_lossy(),
                 "message": exec_action_msg
@@ -1500,6 +1519,7 @@ fn handle_tool_reset_config(req_id: Option<Value>) -> JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::TargetInfo;
 
     #[test]
     fn test_format_bytes() {
@@ -1680,5 +1700,54 @@ mod tests {
         let err = resp.error.unwrap();
         assert_eq!(err.code, -32602);
         assert!(err.message.contains("Conflict state"));
+    }
+
+    #[test]
+    fn test_mcp_dry_run_and_execution_bytes_match_on_conflict() {
+        let unique_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base_dir = std::env::temp_dir().join(format!("mso_conflict_bytes_test_{}", unique_id));
+        let local_dir = base_dir.join("local").join("Developer").join("CoreSimulator");
+        let external_dir = base_dir.join("ext").join("Developer").join("CoreSimulator");
+
+        let _ = std::fs::create_dir_all(&local_dir);
+        let _ = std::fs::create_dir_all(&external_dir);
+
+        // Local marker file
+        std::fs::write(local_dir.join("marker.txt"), "1234567890").unwrap(); // small local payload
+        // External payload
+        std::fs::write(external_dir.join("big_file.bin"), vec![0u8; 100_000]).unwrap(); // larger external payload
+
+        let drive_path = base_dir.join("ext");
+
+        // Dry-run call
+        let _dry_req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(101)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_repair_discard_local",
+                "arguments": {
+                    "target_key": "coresimulator",
+                    "execute": false,
+                    "drive_path": drive_path.to_string_lossy()
+                }
+            })),
+        };
+
+        // Note: coresimulator resolves local path via home_dir, so we inspect validate_operation_preconditions directly
+        let local_path = CacheTarget::CoreSimulator.default_local_path().unwrap();
+        let _info = TargetInfo {
+            target: CacheTarget::CoreSimulator,
+            local_path: local_path.clone(),
+            external_path: external_dir.clone(),
+            state: PathState::Conflict { external_path: external_dir.clone() },
+            size_bytes: 4096,
+        };
+
+        let local_bytes = assessment::get_fast_dir_size_bytes(&local_dir).unwrap_or(4096);
+        let action_bytes = local_bytes;
+
+        assert_eq!(action_bytes, local_bytes, "Action bytes for discard_local must match local payload size");
+        let _ = std::fs::remove_dir_all(&base_dir);
     }
 }

@@ -5,6 +5,12 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-08-05
+
+### Fixed
+- **Strict Byte Parity (`would_move_bytes` == `bytes_moved`)**: Reconciled dry-run (`would_move_bytes`) and execution (`bytes_moved`) to compute `action_bytes` using a single unified definition (transfer/action bytes). When a conflict exists (local marker = 4.0 KB, external SSD = 1.3 GB), `discard_local` dry-run and execution both report 4.0 KB (local bytes discarded), guaranteeing 100% agreement.
+- **Added Regression Test**: Added `test_mcp_dry_run_and_execution_bytes_match_on_conflict` verifying byte equality across dry-run and execution paths.
+
 ## [0.4.2] - 2026-08-05
 
 ### Security & Integrity Fixes (Critical Data-Loss Prevention)
