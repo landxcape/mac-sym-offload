@@ -807,13 +807,15 @@ fn handle_tool_offload_target(
         TargetOperation::Offload => ConflictStrategy::Merge,
         TargetOperation::Restore { .. } => ConflictStrategy::RollbackExternalToLocal,
     };
-    let strat_str = explicit_strat.unwrap_or(match conflict_strat {
-        ConflictStrategy::RollbackExternalToLocal => "rollback_to_local",
-        ConflictStrategy::Relink => "relink",
-        ConflictStrategy::DiscardLocal => "discard_local",
-        ConflictStrategy::KeepLocalDiscardExternal => "discard_external",
-        ConflictStrategy::Merge => "merge",
-        ConflictStrategy::OverwriteExternal => "overwrite_external",
+    let strat_str = explicit_strat.unwrap_or(match target_op {
+        TargetOperation::Offload => "offload",
+        TargetOperation::RollbackToLocal => "rollback_to_local",
+        TargetOperation::Relink => "relink",
+        TargetOperation::DiscardLocal => "discard_local",
+        TargetOperation::DiscardExternal => "discard_external",
+        TargetOperation::Merge => "merge",
+        TargetOperation::OverwriteExternal => "overwrite_external",
+        _ => "offload",
     });
 
     if let Err(e) = migrator::validate_operation_preconditions(&info, target_op) {
@@ -877,8 +879,16 @@ fn handle_tool_offload_target(
             previewed.insert(target_key.to_string());
         }
 
-        let (warning_msg, _action_msg) = match conflict_strat {
-            ConflictStrategy::RollbackExternalToLocal => (
+        let (warning_msg, _action_msg) = match (explicit_strat, target_op) {
+            (None, TargetOperation::Offload) => (
+                format!(
+                    "This will offload local Mac directory '{}' ({}) to external APFS SSD and establish a symlink. Re-call with execute: true to commit.",
+                    info.local_path.to_string_lossy(),
+                    format_bytes(action_bytes)
+                ),
+                format!("Successfully offloaded {} to external APFS SSD and established symlink.", target.display_name())
+            ),
+            (Some("rollback_to_local"), _) | (Some("rollback_external_to_local"), _) | (_, TargetOperation::RollbackToLocal) => (
                 format!(
                     "This will restore '{}' ({}) from external SSD back to local Mac storage and delete the external backup. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
@@ -886,7 +896,7 @@ fn handle_tool_offload_target(
                 ),
                 format!("Successfully rolled back {} from external APFS SSD to local Mac storage.", target.display_name())
             ),
-            ConflictStrategy::Relink => (
+            (Some("relink"), _) | (_, TargetOperation::Relink) => (
                 format!(
                     "This will replace local symlink '{}' with an updated symlink pointing to '{}'. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
@@ -894,7 +904,7 @@ fn handle_tool_offload_target(
                 ),
                 format!("Successfully updated symlink for {}.", target.display_name())
             ),
-            ConflictStrategy::DiscardLocal => (
+            (Some("discard_local"), _) | (_, TargetOperation::DiscardLocal) => (
                 format!(
                     "This will permanently delete local Mac directory '{}' ({}) and establish a symlink to existing external SSD backup. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
@@ -902,7 +912,7 @@ fn handle_tool_offload_target(
                 ),
                 format!("Successfully discarded local copy and established symlink for {}.", target.display_name())
             ),
-            ConflictStrategy::KeepLocalDiscardExternal => (
+            (Some("discard_external"), _) | (Some("keep_local_discard_external"), _) | (_, TargetOperation::DiscardExternal) => (
                 format!(
                     "This will permanently delete external SSD backup '{}' ({}) and leave local Mac directory untouched. Re-call with execute: true to commit.",
                     info.external_path.to_string_lossy(),
@@ -910,21 +920,21 @@ fn handle_tool_offload_target(
                 ),
                 format!("Successfully discarded external SSD backup for {}.", target.display_name())
             ),
-            ConflictStrategy::Merge => (
-                format!(
-                    "This will merge local Mac directory '{}' ({}) into external SSD backup and establish a symlink. Re-call with execute: true to commit.",
-                    info.local_path.to_string_lossy(),
-                    format_bytes(action_bytes)
-                ),
-                format!("Successfully merged {} into external APFS SSD and established symlink.", target.display_name())
-            ),
-            ConflictStrategy::OverwriteExternal => (
+            (Some("overwrite_external"), _) | (_, TargetOperation::OverwriteExternal) => (
                 format!(
                     "This will overwrite external SSD backup with local Mac directory '{}' ({}) and establish a symlink. Re-call with execute: true to commit.",
                     info.local_path.to_string_lossy(),
                     format_bytes(action_bytes)
                 ),
                 format!("Successfully overwrote external SSD backup and established symlink for {}.", target.display_name())
+            ),
+            _ => (
+                format!(
+                    "This will merge local Mac directory '{}' ({}) into external SSD backup and establish a symlink. Re-call with execute: true to commit.",
+                    info.local_path.to_string_lossy(),
+                    format_bytes(action_bytes)
+                ),
+                format!("Successfully merged {} into external APFS SSD and established symlink.", target.display_name())
             ),
         };
 
@@ -987,7 +997,8 @@ fn handle_tool_offload_target(
     }
 
     // Execute non-interactive migration
-    let result = migrator::migrate_target(&info, Some(conflict_strat), false, false);
+    let opt_conflict_strat = explicit_strat.map(|_| conflict_strat);
+    let result = migrator::migrate_target(&info, opt_conflict_strat, false, false);
 
     // Always release the concurrency lock, even on failure
     {
@@ -1743,5 +1754,79 @@ mod tests {
 
         assert_eq!(action_bytes, 4096, "Action bytes for discard_local must equal 4096 bytes");
         let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_mcp_fresh_target_offload_dry_run_and_execution() {
+        let unique_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base_dir = std::env::temp_dir().join(format!("mso_fresh_offload_test_{}", unique_id));
+        let local_dir = CacheTarget::CocoaPods.default_local_path().unwrap();
+        let backup_dir = std::env::temp_dir().join(format!("mso_cocoapods_unit_backup_{}", unique_id));
+
+        let had_local = local_dir.exists() || local_dir.is_symlink();
+        if had_local {
+            let _ = std::fs::rename(&local_dir, &backup_dir);
+        }
+
+        let _ = std::fs::create_dir_all(&local_dir);
+        std::fs::write(local_dir.join("marker.txt"), "unit test payload").unwrap();
+
+        // 1. Dry run call for Fresh target
+        let dry_req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(301)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_offload_target",
+                "arguments": {
+                    "target_key": "cocoapods",
+                    "execute": false,
+                    "drive_path": base_dir.to_string_lossy()
+                }
+            })),
+        };
+
+        let dry_resp = handle_mcp_request(&dry_req);
+        assert_eq!(dry_resp.jsonrpc, "2.0");
+        let dry_res = dry_resp.result.expect("Dry run on Fresh target must succeed");
+        let dry_text = dry_res["content"][0]["text"].as_str().unwrap();
+        let dry_json: Value = serde_json::from_str(dry_text).unwrap();
+
+        assert_eq!(dry_json["current_state"], "Fresh");
+        assert_eq!(dry_json["conflict_strategy"], "offload");
+        let would_move_bytes = dry_json["would_move_bytes"].as_u64().unwrap();
+        assert!(would_move_bytes > 0);
+
+        // 2. Execution call for Fresh target
+        let exec_req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(302)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_offload_target",
+                "arguments": {
+                    "target_key": "cocoapods",
+                    "execute": true,
+                    "drive_path": base_dir.to_string_lossy()
+                }
+            })),
+        };
+
+        let exec_resp = handle_mcp_request(&exec_req);
+        assert_eq!(exec_resp.jsonrpc, "2.0");
+        let exec_res = exec_resp.result.expect("Execution on Fresh target must succeed");
+        let exec_text = exec_res["content"][0]["text"].as_str().unwrap();
+        let exec_json: Value = serde_json::from_str(exec_text).unwrap();
+
+        assert_eq!(exec_json["success"], true);
+        let bytes_moved = exec_json["bytes_moved"].as_u64().unwrap();
+        assert_eq!(would_move_bytes, bytes_moved);
+
+        // Cleanup
+        let _ = std::fs::remove_file(&local_dir);
+        let _ = std::fs::remove_dir_all(&base_dir);
+        if had_local {
+            let _ = std::fs::rename(&backup_dir, &local_dir);
+        }
     }
 }

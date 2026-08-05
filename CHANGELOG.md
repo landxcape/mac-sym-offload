@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-08-05
+
+### Fixed
+- **Fresh Target Offload Execution Fix**: Fixed a bug where `mso_offload_target` passed `Some(ConflictStrategy::Merge)` to `migrator::migrate_target` for `Fresh` state targets when no explicit conflict strategy argument was specified. When `explicit_strat` is `None`, `migrator::migrate_target` now correctly receives `None`, causing `Fresh` state targets to execute `execute_fresh_migration` cleanly instead of failing precondition validation for `Merge`.
+- **Display & Warning Message Clarity**: Updated dry-run preview formatting for plain `mso_offload_target` calls against `Fresh` targets to display `conflict_strategy: "offload"` and warning `"This will offload local Mac directory ... to external APFS SSD and establish a symlink"`.
+- **Added Integration Test**: Added `test_mcp_fresh_target_offload_dry_run_and_execution` verifying end-to-end dry-run preview and execution on `Fresh` state targets.
+
 ## [0.4.4] - 2026-08-05
 
 ### Fixed
