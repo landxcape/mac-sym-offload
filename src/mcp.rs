@@ -9,7 +9,7 @@ use crate::assessment;
 use crate::config::AppConfig;
 use crate::discovery;
 use crate::migrator;
-use crate::models::{CacheTarget, ConflictStrategy, PathState};
+use crate::models::{CacheTarget, ConflictStrategy, PathState, TargetOperation};
 
 // In-process lock: tracks target keys currently being migrated.
 // Prevents concurrent MCP calls from racing on the same cache directory.
@@ -608,7 +608,7 @@ fn handle_tool_diagnose(req_id: Option<Value>) -> JsonRpcResponse {
                     ),
                     PathState::Conflict { .. } => (
                         "Data conflict: local Mac directory exists AND external SSD directory exists.".to_string(),
-                        vec!["merge", "overwrite_external", "discard_local", "rollback_to_local"]
+                        vec!["merge", "overwrite_external", "discard_local", "discard_external", "rollback_to_local"]
                     ),
                     _ => ("".to_string(), vec![])
                 };
@@ -715,16 +715,6 @@ fn handle_tool_offload_target(
         }
     };
 
-    let strat_str = args.get("conflict_strategy").and_then(|v| v.as_str()).unwrap_or("merge");
-    let conflict_strat = match strat_str {
-        "overwrite_external" => ConflictStrategy::OverwriteExternal,
-        "discard_local" => ConflictStrategy::DiscardLocal,
-        "rollback_to_local" | "rollback_external_to_local" => ConflictStrategy::RollbackExternalToLocal,
-        "relink" => ConflictStrategy::Relink,
-        "discard_external" | "keep_local_discard_external" => ConflictStrategy::KeepLocalDiscardExternal,
-        _ => ConflictStrategy::Merge,
-    };
-
     // Step 3: Resolve drive path (config fallback chain)
     let config = AppConfig::load();
     let drives = discovery::discover_external_drives().unwrap_or_default();
@@ -750,6 +740,74 @@ fn handle_tool_offload_target(
             };
         }
     };
+
+    let info = match assessment::assess_target(&target, &drive_path) {
+        Ok(i) => i,
+        Err(e) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id: req_id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!("Assessment failed: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    let explicit_strat = args.get("conflict_strategy").and_then(|v| v.as_str());
+    let target_op = match explicit_strat {
+        Some("overwrite_external") => TargetOperation::OverwriteExternal,
+        Some("discard_local") => TargetOperation::DiscardLocal,
+        Some("rollback_to_local") | Some("rollback_external_to_local") => TargetOperation::RollbackToLocal,
+        Some("relink") => TargetOperation::Relink,
+        Some("discard_external") | Some("keep_local_discard_external") => TargetOperation::DiscardExternal,
+        Some("merge") => TargetOperation::Merge,
+        Some(_) => TargetOperation::Merge,
+        None => match &info.state {
+            PathState::AlreadyLinked { .. } => TargetOperation::Offload,
+            PathState::StaleSymlink { .. } => TargetOperation::Relink,
+            PathState::Fresh => TargetOperation::Offload,
+            PathState::RebindDrive { .. } => TargetOperation::Offload,
+            PathState::GhostLocal { .. } => TargetOperation::Offload,
+            PathState::Conflict { .. } => TargetOperation::Merge,
+            PathState::ExistingExternalData { .. } => TargetOperation::Relink,
+            PathState::NotFound => TargetOperation::Offload,
+        },
+    };
+    let conflict_strat = match target_op {
+        TargetOperation::RollbackToLocal => ConflictStrategy::RollbackExternalToLocal,
+        TargetOperation::Relink => ConflictStrategy::Relink,
+        TargetOperation::DiscardLocal => ConflictStrategy::DiscardLocal,
+        TargetOperation::DiscardExternal => ConflictStrategy::KeepLocalDiscardExternal,
+        TargetOperation::Merge => ConflictStrategy::Merge,
+        TargetOperation::OverwriteExternal => ConflictStrategy::OverwriteExternal,
+        TargetOperation::Offload => ConflictStrategy::Merge,
+        TargetOperation::Restore { .. } => ConflictStrategy::RollbackExternalToLocal,
+    };
+    let strat_str = explicit_strat.unwrap_or(match conflict_strat {
+        ConflictStrategy::RollbackExternalToLocal => "rollback_to_local",
+        ConflictStrategy::Relink => "relink",
+        ConflictStrategy::DiscardLocal => "discard_local",
+        ConflictStrategy::KeepLocalDiscardExternal => "discard_external",
+        ConflictStrategy::Merge => "merge",
+        ConflictStrategy::OverwriteExternal => "overwrite_external",
+    });
+
+    if let Err(e) = migrator::validate_operation_preconditions(&info, target_op) {
+        return JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: req_id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: e.to_string(),
+                data: None,
+            }),
+        };
+    }
 
     // SERVER-ENFORCED GATE: Reject execute: true if no preceding dry-run preview call occurred
     if execute {
@@ -784,22 +842,6 @@ fn handle_tool_offload_target(
             }),
         };
     }
-
-    let info = match assessment::assess_target(&target, &drive_path) {
-        Ok(i) => i,
-        Err(e) => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0",
-                id: req_id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Assessment failed: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
 
     let size_bytes = info.size_bytes;
 
@@ -1495,7 +1537,7 @@ mod tests {
             params: Some(json!({
                 "name": "mso_offload_target",
                 "arguments": {
-                    "target_key": "derived-data",
+                    "target_key": "coresimulator",
                     "drive_path": "/"
                 }
             })),
@@ -1511,7 +1553,7 @@ mod tests {
         let preview: Value = serde_json::from_str(text).unwrap();
 
         assert_eq!(preview["dry_run"], true);
-        assert_eq!(preview["target_key"], "derived-data");
+        assert_eq!(preview["target_key"], "coresimulator");
         assert!(preview["warning"].as_str().unwrap().contains("execute: true"));
     }
 
@@ -1581,6 +1623,10 @@ mod tests {
 
     #[test]
     fn test_mcp_rollback_to_local_dry_run() {
+        let temp_dir = std::env::temp_dir().join(format!("mso_mcp_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let ext_dir = temp_dir.join("Developer/CoreSimulator");
+        let _ = std::fs::create_dir_all(&ext_dir);
+
         let req = JsonRpcRequest {
             jsonrpc: "2.0".into(),
             id: Some(json!(5)),
@@ -1590,7 +1636,7 @@ mod tests {
                 "arguments": {
                     "target_key": "coresimulator",
                     "execute": false,
-                    "drive_path": "/"
+                    "drive_path": temp_dir.to_string_lossy()
                 }
             })),
         };
@@ -1604,5 +1650,35 @@ mod tests {
         assert!(text.contains("rollback_to_local"));
         assert!(text.contains("restore"));
         assert!(text.contains("from external SSD back to local Mac storage"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_mcp_rejects_overwrite_external_on_already_linked() {
+        // xcode-archives or derived-data on this system is in AlreadyLinked state if offloaded, or Fresh if local.
+        // If we pass an invalid state strategy like overwrite_external on an already linked or fresh target,
+        // it must return a -32602 JSON-RPC error.
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(99)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_repair_overwrite_external",
+                "arguments": {
+                    "target_key": "coresimulator",
+                    "execute": false,
+                    "drive_path": "/tmp"
+                }
+            })),
+        };
+
+        let resp = handle_mcp_request(&req);
+        assert_eq!(resp.jsonrpc, "2.0");
+        assert_eq!(resp.id, Some(json!(99)));
+
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("Conflict state"));
     }
 }

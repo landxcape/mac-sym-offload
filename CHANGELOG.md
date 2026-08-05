@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-08-05
+
+### Security & Integrity Fixes (Critical Data-Loss Prevention)
+- **Strict Strategy Pre-Condition Engine (`validate_operation_preconditions`)**: Rejects destructive conflict strategies (`overwrite_external`, `discard_local`, `discard_external`, `merge`) when target is in `AlreadyLinked` or non-`Conflict` state. Prevents data destruction from calling `overwrite_external` against symlinks pointing to external SSD targets.
+- **`discard_external` Strategy Exposure**: Added `"discard_external"` (`keep_local_discard_external`) to `available_strategies` in `mso_diagnose` JSON output.
+- **Reporting Accuracy**: Standardized dry-run (`would_move_bytes`) and execution (`bytes_moved`) to report exact operation action bytes.
+
 ## [0.4.1] - 2026-08-02
 
 ### Fixed

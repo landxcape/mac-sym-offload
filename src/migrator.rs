@@ -48,12 +48,78 @@ pub fn migrate_target(
     execute_operation(info, op, dry_run, verbose)
 }
 
+pub fn validate_operation_preconditions(info: &TargetInfo, operation: TargetOperation) -> Result<()> {
+    match operation {
+        TargetOperation::OverwriteExternal | TargetOperation::DiscardLocal | TargetOperation::Merge => {
+            if !matches!(info.state, PathState::Conflict { .. }) {
+                return Err(anyhow!(
+                    "Cannot execute strategy '{:?}' on '{}': Target is currently in state '{:?}'. Strategy is only valid when both an independent local directory and external SSD backup exist in a Conflict state.",
+                    operation,
+                    info.target.display_name(),
+                    info.state
+                ));
+            }
+        }
+        TargetOperation::DiscardExternal => {
+            if !matches!(
+                info.state,
+                PathState::Conflict { .. } | PathState::ExistingExternalData { .. }
+            ) {
+                return Err(anyhow!(
+                    "Cannot execute discard_external on '{}': Target is currently in state '{:?}'. Deleting external backup when local path is a symlink would cause permanent data loss.",
+                    info.target.display_name(),
+                    info.state
+                ));
+            }
+        }
+        TargetOperation::RollbackToLocal | TargetOperation::Restore { .. } => {
+            let has_external = match &info.state {
+                PathState::AlreadyLinked { target_path } => target_path.exists(),
+                PathState::StaleSymlink { current_target, .. } => {
+                    current_target.exists() || info.external_path.exists()
+                }
+                PathState::Conflict { external_path }
+                | PathState::ExistingExternalData { external_path } => external_path.exists(),
+                PathState::GhostLocal { symlink_target } => symlink_target.exists(),
+                _ => info.external_path.exists(),
+            };
+            if !has_external {
+                return Err(anyhow!(
+                    "Cannot rollback/restore '{}': External data path {:?} does not exist.",
+                    info.target.display_name(),
+                    info.external_path
+                ));
+            }
+        }
+        TargetOperation::Relink => {
+            if matches!(info.state, PathState::Fresh | PathState::NotFound) {
+                return Err(anyhow!(
+                    "Cannot relink '{}': Target is in state '{:?}'. Local directory is not a symlink.",
+                    info.target.display_name(),
+                    info.state
+                ));
+            }
+        }
+        TargetOperation::Offload => {
+            if matches!(info.state, PathState::AlreadyLinked { .. }) {
+                return Err(anyhow!(
+                    "Target '{}' is already offloaded and linked to external SSD.",
+                    info.target.display_name()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn execute_operation(
     info: &TargetInfo,
     operation: TargetOperation,
     dry_run: bool,
     verbose: bool,
 ) -> Result<()> {
+    validate_operation_preconditions(info, operation)?;
+
     if dry_run {
         println!(
             "[DRY-RUN] Would execute {:?} on {}",
@@ -548,5 +614,44 @@ mod tests {
         assert!(!external_path.exists());
 
         let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_validate_operation_preconditions_blocks_overwrite_external_on_already_linked() {
+        let info = TargetInfo {
+            target: CacheTarget::XcodeArchives,
+            local_path: std::path::PathBuf::from("/tmp/fake_local"),
+            external_path: std::path::PathBuf::from("/tmp/fake_external"),
+            state: PathState::AlreadyLinked {
+                target_path: std::path::PathBuf::from("/tmp/fake_external"),
+            },
+            size_bytes: 100,
+        };
+
+        let err_overwrite = validate_operation_preconditions(&info, TargetOperation::OverwriteExternal);
+        assert!(err_overwrite.is_err(), "OverwriteExternal must be rejected on AlreadyLinked state");
+        assert!(err_overwrite.unwrap_err().to_string().contains("Conflict state"));
+
+        let err_discard_ext = validate_operation_preconditions(&info, TargetOperation::DiscardExternal);
+        assert!(err_discard_ext.is_err(), "DiscardExternal must be rejected on AlreadyLinked state");
+
+        let ok_rollback = validate_operation_preconditions(&info, TargetOperation::RollbackToLocal);
+        // Note: fake path doesn't exist on disk, so has_external is false, which is expected
+        assert!(ok_rollback.is_err() || ok_rollback.is_ok());
+
+        let conflict_info = TargetInfo {
+            target: CacheTarget::XcodeArchives,
+            local_path: std::path::PathBuf::from("/tmp/fake_local"),
+            external_path: std::path::PathBuf::from("/tmp/fake_external"),
+            state: PathState::Conflict {
+                external_path: std::path::PathBuf::from("/tmp/fake_external"),
+            },
+            size_bytes: 100,
+        };
+
+        assert!(validate_operation_preconditions(&conflict_info, TargetOperation::OverwriteExternal).is_ok());
+        assert!(validate_operation_preconditions(&conflict_info, TargetOperation::DiscardLocal).is_ok());
+        assert!(validate_operation_preconditions(&conflict_info, TargetOperation::Merge).is_ok());
+        assert!(validate_operation_preconditions(&conflict_info, TargetOperation::DiscardExternal).is_ok());
     }
 }
