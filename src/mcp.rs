@@ -672,33 +672,24 @@ fn handle_tool_offload_target(
     args: &Value,
     progress_token: Option<Value>,
 ) -> JsonRpcResponse {
-    // Step 1: Validate user-supplied params first (-32602 for all param errors)
-    let target_key = match args.get("target_key").and_then(|v| v.as_str()) {
-        Some(k) => k,
-        None => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0",
-                id: req_id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: "Missing target_key argument".into(),
-                    data: None,
-                }),
-            };
-        }
-    };
+    // Step 1: Resolve target (either custom_local_path or target_key)
+    let custom_path_arg = args
+        .get("custom_local_path")
+        .or_else(|| args.get("folder_path"))
+        .and_then(|v| v.as_str());
 
-    // Dry-run gate: execute defaults to false.
-    // Agents MUST call with execute: false first (returns a preview),
-    // then make a second explicit call with execute: true to commit.
-    // This prevents any agent from autonomously moving/deleting data in a single call.
-    let execute = args.get("execute").and_then(|v| v.as_bool()).unwrap_or(false);
+    let (target, target_key) = if let Some(custom_path_str) = custom_path_arg {
+        let expanded_path = if custom_path_str.starts_with("~/") {
+            if let Some(home) = dirs::home_dir() {
+                home.join(&custom_path_str[2..])
+            } else {
+                std::path::PathBuf::from(custom_path_str)
+            }
+        } else {
+            std::path::PathBuf::from(custom_path_str)
+        };
 
-    // Step 2: Resolve target by key before touching the filesystem
-    let target = match CacheTarget::all().into_iter().find(|t| t.key() == target_key) {
-        Some(t) => t,
-        None => {
+        if !expanded_path.exists() || !expanded_path.is_dir() {
             return JsonRpcResponse {
                 jsonrpc: "2.0",
                 id: req_id,
@@ -706,19 +697,76 @@ fn handle_tool_offload_target(
                 error: Some(JsonRpcError {
                     code: -32602,
                     message: format!(
-                        "Unknown target_key '{}'. Run mso_list_targets to see valid keys.",
-                        target_key
+                        "Custom path '{}' does not exist or is not a directory.",
+                        expanded_path.display()
                     ),
                     data: None,
                 }),
             };
         }
+
+        let name = args
+            .get("custom_name")
+            .or_else(|| args.get("target_name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| {
+                expanded_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("CustomFolder")
+            })
+            .to_string();
+
+        let custom = CacheTarget::Custom {
+            name,
+            local_rel_path: expanded_path,
+        };
+        let key = custom.key();
+        (custom, key)
+    } else {
+        let key_str = match args.get("target_key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => {
+                return JsonRpcResponse {
+                    jsonrpc: "2.0",
+                    id: req_id,
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32602,
+                        message: "Missing target_key or custom_local_path argument".into(),
+                        data: None,
+                    }),
+                };
+            }
+        };
+
+        let found_target = match CacheTarget::all().into_iter().find(|t| t.key() == key_str) {
+            Some(t) => t,
+            None => {
+                return JsonRpcResponse {
+                    jsonrpc: "2.0",
+                    id: req_id,
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32602,
+                        message: format!(
+                            "Unknown target_key '{}'. Run mso_list_targets to see valid keys.",
+                            key_str
+                        ),
+                        data: None,
+                    }),
+                };
+            }
+        };
+        (found_target, key_str.to_string())
     };
+
+    let execute = args.get("execute").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // SERVER-ENFORCED GATE: Reject execute: true if no preceding dry-run preview call occurred
     if execute {
         let previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
-        if !previewed.contains(target_key) {
+        if !previewed.contains(&target_key) {
             return JsonRpcResponse {
                 jsonrpc: "2.0",
                 id: req_id,
@@ -938,6 +986,11 @@ fn handle_tool_offload_target(
             ),
         };
 
+        {
+            let mut previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
+            previewed.insert(target_key.to_string());
+        }
+
         let preview = json!({
             "dry_run": true,
             "target_key": target.key(),
@@ -969,7 +1022,7 @@ fn handle_tool_offload_target(
     // by another concurrent MCP tool call in this server process.
     {
         let mut active = active_migrations().lock().unwrap_or_else(|e| e.into_inner());
-        if active.contains(target_key) {
+        if active.contains(&target_key) {
             return JsonRpcResponse {
                 jsonrpc: "2.0",
                 id: req_id,
@@ -1003,13 +1056,13 @@ fn handle_tool_offload_target(
     // Always release the concurrency lock, even on failure
     {
         let mut active = active_migrations().lock().unwrap_or_else(|e| e.into_inner());
-        active.remove(target_key);
+        active.remove(&target_key);
     }
 
     // On completion, clear dry-run preview state so future operations require a fresh preview
     {
         let mut previewed = previewed_targets().lock().unwrap_or_else(|e| e.into_inner());
-        previewed.remove(target_key);
+        previewed.remove(&target_key);
     }
 
     match result {
@@ -1828,5 +1881,71 @@ mod tests {
         if had_local {
             let _ = std::fs::rename(&backup_dir, &local_dir);
         }
+    }
+
+    #[test]
+    fn test_mcp_offload_custom_folder_dry_run_and_execution() {
+        let unique_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base_dir = std::env::temp_dir().join(format!("mso_custom_offload_test_{}", unique_id));
+        let custom_local_dir = std::env::temp_dir().join(format!("mso_custom_dummy_folder_{}", unique_id));
+
+        let _ = std::fs::create_dir_all(&custom_local_dir);
+        std::fs::write(custom_local_dir.join("marker.txt"), "custom folder marker payload\n").unwrap();
+
+        // 1. Dry run call for custom folder
+        let dry_req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(401)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_offload_custom_folder",
+                "arguments": {
+                    "custom_local_path": custom_local_dir.to_string_lossy(),
+                    "execute": false,
+                    "drive_path": base_dir.to_string_lossy()
+                }
+            })),
+        };
+
+        let dry_resp = handle_mcp_request(&dry_req);
+        assert_eq!(dry_resp.jsonrpc, "2.0");
+        let dry_res = dry_resp.result.expect("Dry run on custom folder must succeed");
+        let dry_text = dry_res["content"][0]["text"].as_str().unwrap();
+        let dry_json: Value = serde_json::from_str(dry_text).unwrap();
+
+        assert_eq!(dry_json["current_state"], "Fresh");
+        assert_eq!(dry_json["conflict_strategy"], "offload");
+        let would_move_bytes = dry_json["would_move_bytes"].as_u64().unwrap();
+        assert!(would_move_bytes > 0);
+
+        // 2. Execution call for custom folder
+        let exec_req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(402)),
+            method: "tools/call".into(),
+            params: Some(json!({
+                "name": "mso_offload_custom_folder",
+                "arguments": {
+                    "custom_local_path": custom_local_dir.to_string_lossy(),
+                    "execute": true,
+                    "drive_path": base_dir.to_string_lossy()
+                }
+            })),
+        };
+
+        let exec_resp = handle_mcp_request(&exec_req);
+        assert_eq!(exec_resp.jsonrpc, "2.0");
+        let exec_res = exec_resp.result.expect("Execution on custom folder must succeed");
+        let exec_text = exec_res["content"][0]["text"].as_str().unwrap();
+        let exec_json: Value = serde_json::from_str(exec_text).unwrap();
+
+        assert_eq!(exec_json["success"], true);
+        let bytes_moved = exec_json["bytes_moved"].as_u64().unwrap();
+        assert_eq!(would_move_bytes, bytes_moved);
+        assert!(custom_local_dir.is_symlink(), "Custom local directory must be converted to a symlink");
+
+        // Cleanup
+        let _ = std::fs::remove_file(&custom_local_dir);
+        let _ = std::fs::remove_dir_all(&base_dir);
     }
 }

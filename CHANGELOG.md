@@ -5,6 +5,13 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-08-06
+
+### Fixed
+- **Custom Folder Offload Target Resolution Fix**: Fixed a bug in `handle_tool_offload_target` where custom folders passed via `mso_offload_custom_folder` failed target resolution with `Unknown target_key 'custom-...'`. Target resolution now inspects `custom_local_path` parameters and resolves `CacheTarget::Custom` dynamically.
+- **Custom Folder Relative Path Handling**: Updated `CacheTarget::Custom` `default_relative_path` resolution so absolute custom paths map safely to `CustomFolders/<folder_name>` on the external SSD instead of colliding with local absolute paths.
+- **Added Integration Test**: Added `test_mcp_offload_custom_folder_dry_run_and_execution` to test end-to-end dry-run preview and execution on custom folders.
+
 ## [0.4.6] - 2026-08-06
 
 ### Enhanced

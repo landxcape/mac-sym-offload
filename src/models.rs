@@ -97,7 +97,17 @@ impl CacheTarget {
             CacheTarget::Npm => PathBuf::from(".npm"),
             CacheTarget::Cargo => PathBuf::from(".cargo/registry"),
             CacheTarget::Maven => PathBuf::from(".m2/repository"),
-            CacheTarget::Custom { local_rel_path, .. } => local_rel_path.clone(),
+            CacheTarget::Custom { name, local_rel_path } => {
+                if local_rel_path.is_absolute() {
+                    let folder_name = local_rel_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(name);
+                    PathBuf::from("CustomFolders").join(folder_name)
+                } else {
+                    local_rel_path.clone()
+                }
+            }
         }
     }
 
