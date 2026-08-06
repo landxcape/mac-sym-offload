@@ -5,6 +5,11 @@ All notable changes to the `mac-sym-offload` (`mso`) project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-08-06
+
+### Enhanced
+- **Actionable Error Message Hints for Offload Attempts on Linked Targets**: Updated `validate_operation_preconditions` error message when `mso_offload_target` is attempted on targets that are already offloaded (`AlreadyLinked` state) to surface the active target path and suggest calling `mso_repair_rollback_to_local` to restore data back to local Mac storage.
+
 ## [0.4.5] - 2026-08-05
 
 ### Fixed

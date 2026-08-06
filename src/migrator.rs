@@ -101,10 +101,11 @@ pub fn validate_operation_preconditions(info: &TargetInfo, operation: TargetOper
             }
         }
         TargetOperation::Offload => {
-            if matches!(info.state, PathState::AlreadyLinked { .. }) {
+            if let PathState::AlreadyLinked { target_path } = &info.state {
                 return Err(anyhow!(
-                    "Target '{}' is already offloaded and linked to external SSD.",
-                    info.target.display_name()
+                    "Target '{}' is already offloaded and linked to external SSD ({:?}). To restore it back to local Mac storage, call mso_repair_rollback_to_local.",
+                    info.target.display_name(),
+                    target_path
                 ));
             }
         }
