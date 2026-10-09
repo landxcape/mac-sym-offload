@@ -4,27 +4,24 @@
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://apple.com/macos)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`mso` (**macOS Developer Storage Migrator**) is a fast, safe, and production-ready CLI/TUI tool written in Rust. It enables iOS, Android, Flutter, Web, and Rust developers on Mac (256GB/512GB base models) to safely offload bloated cache directories to an external APFS SSD and manage macOS symbolic links (`ln -s`).
+`mso` (**macOS Developer Storage Migrator**) is a CLI/TUI tool written in Rust. It helps developers offload large cache directories (Xcode DerivedData, Android Gradle, CocoaPods, simulators) to an external APFS drive and replaces them with symbolic links.
 
 ---
 
 ## 🌟 Key Features
 
-* **11 Pre-Configured + Custom Targets**: Offload Xcode DerivedData, Android `.gradle`, Flutter `.pub-cache`, NPM `.npm`, Cargo `.cargo/registry`, Maven `.m2/repository`, iOS CoreSimulator, CocoaPods, Xcode Archives, iOS Device Support, and **arbitrary custom local folders** (`+ Add Custom Local Folder Path`).
-* **Live Dual-Line Progress Bar Engine**: Displays real-time transfer speeds (`82.3 MiB/s`), live ETAs (`9m`), byte progress counters (`1.97 GiB / 45.60 GiB`), and current relative file paths: powered by a custom byte-stream parser compatible with stock macOS `/usr/bin/rsync`.
-* **5-Option Conflict Diagnostics & Rollback Engine**: When data exists on both local Mac and external SSD, `mso` calculates live sizes, detects partial backups, and offers 5 resolution strategies including **`(Recommended: Safe Merge)`**, **`Rollback SSD Data to Local`**, and **`Keep Local & Discard SSD Backup`**.
-* **Atomic Failure Rollback**: If a fresh migration fails due to macOS permission locks (`Operation not permitted`), `mso` automatically cleans up partial SSD copies to leave your local Mac state clean as `Fresh (Local)`.
-* **Custom SSD Target Subfolders**: Choose to offload directly to the external APFS volume root, browse existing subfolders, or create custom target subfolders (`mkdir -p`).
-* **APFS Filesystem Validation**: Queries volume metadata via `diskutil info` to refuse non-APFS formatted drives (exFAT/NTFS) and preserve Unix file permissions.
-* **Role-Aware Target Recommendations**: Categorizes caches into disposable **Build Outputs** (pre-checked by default for immediate space relief) vs **Package Source Registries** (unchecked by default to preserve offline Flutter, Web, and Rust development).
-* **Config Crash Recovery & Auto-Discovery**: Automatically scans attached external SSDs for pre-existing offloaded directories and highlights them for instant re-linking (`[Discovered Files on SSD - Ready to Re-link]`), even if `config.json` is lost or deleted.
-* **Single-Stage Interactive Menu**: Full TUI menu with in-place screen updates (`clear_screen`), cursor preservation, and instant action items (`[*] Auto-Select Recommended`, `[+] Select All`, `[-] Select None`, `+ Add Custom Path`, `↻ Force Rescan`, `‹ Back`).
-* **Top-of-Screen Viewport Positioning**: Automatically clears the terminal viewport upon launch (`\x1B[2J\x1B[1;1H`) so the CLI renders cleanly at row 1, column 1 without bottom-edge terminal cramping.
-* **Universal Step-Wise `ESC` Navigation**: Pressing `ESC` on any wizard step cleanly navigates back to the previous step (Step 3 Checklist -> Step 2 Subfolder -> Step 1 Drive Selection).
-* **In-Memory Session Caching**: Instant (~0ms) back-and-forth wizard navigation without redundant disk I/O thrashes.
-* **Safe Reverse Restore (`mso restore`)**: Brings caches back to local Mac storage with a **10GB internal disk safety gate** (`df -k /` check) to prevent Mac OS disk exhaustion.
-* **Disconnection & Conflict Repair (`mso repair`)**: Fixes broken symlinks, ghost local directories, or data conflicts using saved drive configuration.
-* **Dry-Run Simulation (`--dry-run`)**: Safely preview all file copy and symlink operations without touching disk files.
+* **11 Pre-Configured + Custom Targets**: Offload Xcode DerivedData, Android `.gradle`, Flutter `.pub-cache`, NPM `.npm`, Cargo `.cargo/registry`, Maven `.m2/repository`, iOS CoreSimulator, CocoaPods, Xcode Archives, iOS Device Support, or add custom folder paths.
+* **Real-Time Progress Bars**: Displays transfer speeds, ETAs, transferred bytes, and current file paths during migration.
+* **Conflict Resolution**: When data exists on both the local Mac and the external SSD, choose between safe merge, rolling back to local, or keeping local and discarding external copies.
+* **Failure Cleanup**: If migration fails (e.g., due to file permissions), incomplete copies on the external drive are cleaned up to keep the local setup intact.
+* **Target Subfolders**: Choose to offload directly to the volume root or specify a custom subfolder.
+* **APFS Validation**: Checks drive filesystem via `diskutil` to ensure the target drive uses APFS and preserves macOS file attributes.
+* **Target Categorization**: Distinguishes disposable build outputs (Xcode DerivedData, Gradle) from package registries (Cargo, Pub) to prevent breaking offline development.
+* **Auto-Discovery**: Scans attached external drives for previously offloaded directories for quick re-linking.
+* **Interactive TUI Menu**: Keyboard-driven checklist with select all, select recommended, and back navigation.
+* **Restore Command (`mso restore`)**: Moves offloaded caches back to internal storage with a check to avoid filling up disk space.
+* **Repair Command (`mso repair`)**: Re-links broken symlinks and handles detached drive states.
+* **Dry-Run Mode (`--dry-run`)**: Preview file operations and symlink actions without modifying disk files.
 
 ---
 
