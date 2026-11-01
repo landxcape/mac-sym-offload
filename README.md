@@ -1,14 +1,13 @@
-# mso: macOS Developer Storage Migrator 🚀
+# mso: macOS Developer Storage Migrator
 
-[![Rust](https://img.shields.io/badge/rust-v1.97%2B-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://apple.com/macos)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`mso` (**macOS Developer Storage Migrator**) is a CLI/TUI tool written in Rust. It helps developers offload large cache directories (Xcode DerivedData, Android Gradle, CocoaPods, simulators) to an external APFS drive and replaces them with symbolic links.
+`mso` (**macOS Developer Storage Migrator**) is a CLI/TUI tool that offloads large developer cache directories (Xcode DerivedData, Android Gradle, CocoaPods, simulators) to an external APFS drive and replaces them with atomic symbolic links.
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
 * **11 Pre-Configured + Custom Targets**: Offload Xcode DerivedData, Android `.gradle`, Flutter `.pub-cache`, NPM `.npm`, Cargo `.cargo/registry`, Maven `.m2/repository`, iOS CoreSimulator, CocoaPods, Xcode Archives, iOS Device Support, or add custom folder paths.
 * **Real-Time Progress Bars**: Displays transfer speeds, ETAs, transferred bytes, and current file paths during migration.
@@ -25,7 +24,7 @@
 
 ---
 
-## 📊 Supported Cache Targets
+## Supported Cache Targets
 
 | Component | Target Key | Category | Default macOS Source Path | Default Relative External SSD Path |
 | :--- | :--- | :--- | :--- | :--- |
@@ -44,7 +43,7 @@
 
 ---
 
-## 🛠️ Installation
+## Installation
 
 Users do **NOT** need Rust installed to use `mso`. Standalone pre-compiled universal binaries are published on GitHub Releases and Homebrew.
 
@@ -92,7 +91,7 @@ mso --version
 
 ---
 
-## 💻 Usage & Cheat Sheet
+## Usage & Cheat Sheet
 
 ### 1. Interactive TUI Wizard (Default)
 Simply run `mso` to launch the interactive setup:
@@ -182,7 +181,7 @@ mso config --reset
 ### 8. Model Context Protocol (MCP) Server for AI Assistants
 `mso` includes a native Model Context Protocol (MCP) server that communicates over `stdio` using JSON-RPC 2.0. This allows AI assistants (OpenAI Codex, Claude Desktop, Cursor, VS Code, Google Antigravity) to inspect developer storage, scan targets, diagnose broken links, offload build caches, restore targets, and repair conflicts.
 
-#### 🚀 Method A: Automatic 1-Click Setup (Recommended)
+#### Method A: Automatic Setup (Recommended)
 Run the built-in setup wizard to auto-detect installed AI clients on your Mac and configure `mso`:
 ```bash
 # Launch interactive setup wizard (detects Codex, Claude, Cursor, Antigravity, VS Code):
@@ -191,9 +190,9 @@ mso mcp setup
 # Or check current AI client configuration status:
 mso mcp status
 ```
-> **🛡️ Zero-Distruption Guarantee**: Automatic mode safely parses your existing client JSON files (`claude_desktop_config.json`, `mcp.json`, etc.), inserts/updates ONLY the `"mso"` key inside `"mcpServers"`, and leaves all your other existing MCP servers (`github`, `fetch`, `postgres`, etc.) **100% untouched and intact**.
+> **Zero-Distruption Guarantee**: Automatic mode safely parses your existing client JSON files (`claude_desktop_config.json`, `mcp.json`, etc.), inserts/updates ONLY the `"mso"` key inside `"mcpServers"`, and leaves all your other existing MCP servers (`github`, `fetch`, `postgres`, etc.) **100% untouched and intact**.
 
-#### 🛠️ Method B: Manual Configuration
+#### Method B: Manual Configuration
 If you prefer manual configuration, add the following entry to your AI client's configuration file:
 
 * **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -215,7 +214,7 @@ If you prefer manual configuration, add the following entry to your AI client's 
 * **Google Antigravity CLI / IDE**:
   Schemas and instructions are loaded from `~/.gemini/antigravity-cli/mcp/mso/`. Run `mso mcp setup` to generate the schema directory automatically.
 
-#### ⚠️ Explicit User Confirmation Protocol for AI Agents
+#### Explicit User Confirmation Protocol for AI Agents
 When AI assistants perform data relocation or restore operations (`mso_offload_target`, `mso_offload_custom_folder`, `mso_restore_target`), they follow a mandatory **2-Step Confirmation Protocol**:
 1. **Step 1 (Preview)**: The tool runs with `execute: false` (default) to generate a dry-run preview containing paths, target size, and warning notes.
 2. **Step 2 (Explicit User "Yes")**: The AI assistant presents the preview details to the user and explicitly asks for confirmation (*"Would you like me to proceed with offloading 12.4 GB of DerivedData to /Volumes/ExtremeSSD? Please confirm ('yes' or 'no')."*).
@@ -230,7 +229,7 @@ When AI assistants perform data relocation or restore operations (`mso_offload_t
 
 ---
 
-## 💡 Bonus for Flutter Developers: Parallel Workspace Cleaner (`fpclean_all`)
+## Parallel Workspace Cleaner (`fpclean_all`)
 
 While `mso` manages **global system build caches** (`.gradle`, `DerivedData`, `Archives`, `CoreSimulator`), your local workspace directory containing dozens of Flutter projects can also accumulate 30GB+ of local `build/` and `.dart_tool/` artifacts.
 
@@ -249,7 +248,7 @@ Run `cd ~/Developer/work && fpclean_all` from any parent workspace directory to 
 
 ---
 
-## 🛡️ Safety & Architecture Principles
+## Safety & Architecture Principles
 
 1. **Copy Verification before Local Delete**: `mso` executes `rsync -aP` and verifies exit status before removing local directories.
 2. **Atomic Rollback on Failure**: If local directory removal fails (e.g. due to macOS permission locks), `mso` automatically cleans up partial SSD files to prevent orphaned data.
@@ -260,5 +259,5 @@ Run `cd ~/Developer/work && fpclean_all` from any parent workspace directory to 
 
 ---
 
-## 📄 License
+## License
 Distributed under the [MIT License](LICENSE).
